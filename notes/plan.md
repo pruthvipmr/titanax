@@ -38,23 +38,33 @@
 
 ## Phase P0: Data Parallel Core (Milestone 1)
 
-### P0.1 Runtime & Control Plane
-- [ ] **File: `titanax/runtime/init.py`**
-  - [ ] Implement JAX distributed initialization helper
-  - [ ] Handle multi-host environment variable detection
-  - [ ] Add device enumeration utilities
+### P0.1 Runtime & Control Plane ✅ COMPLETED
+- [x] **File: `titanax/runtime/init.py`**
+  - [x] Implement JAX distributed initialization helper
+  - [x] Handle multi-host environment variable detection
+  - [x] Add device enumeration utilities
 
-- [ ] **File: `titanax/runtime/mesh.py`**
-  - [ ] Implement `MeshSpec` dataclass with validation
-  - [ ] Add `build()` method to create `jax.sharding.Mesh`
-  - [ ] Add `describe()` method for debugging
-  - [ ] Implement shape inference when `shape=None`
-  - [ ] Add device topology hints support
+- [x] **File: `titanax/runtime/mesh.py`**
+  - [x] Implement `MeshSpec` dataclass with validation
+  - [x] Add `build()` method to create `jax.sharding.Mesh`
+  - [x] Add `describe()` method for debugging
+  - [x] Implement shape inference when `shape=None`
+  - [x] Add device topology hints support
 
-- [ ] **File: `titanax/runtime/process_groups.py`**
-  - [ ] Implement `ProcessGroups` class
-  - [ ] Add `size()` and `rank()` methods for mesh axes
-  - [ ] Add validation for axis existence
+- [x] **File: `titanax/runtime/process_groups.py`**
+  - [x] Implement `ProcessGroups` class
+  - [x] Add `size()` and `rank()` methods for mesh axes
+  - [x] Add validation for axis existence
+
+**Notes:**
+- Implemented comprehensive JAX distributed initialization with environment variable detection
+- MeshSpec supports automatic device enumeration ("all"), explicit device lists, and smart shape inference
+- Shape inference handles partial specifications (None values) and balanced factorization for multi-axis meshes
+- Added robust validation with helpful error messages and suggestions
+- ProcessGroups provides convenient axis-based process querying with fallback mechanisms
+- All components include detailed docstrings and error handling with TitanaxError hierarchy
+- Batch compatibility validation included in MeshSpec for data parallel training
+- Supports topology hints for future optimization (placeholder implementation)
 
 ### P0.2 Data Parallel Plan
 - [ ] **File: `titanax/parallel/plan.py`**

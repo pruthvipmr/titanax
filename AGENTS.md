@@ -30,6 +30,9 @@ uv run ruff check src/ tests/ examples/
 # Run examples
 uv run python examples/mnist_dp/train.py
 uv run python examples/gpt_small_tp/train.py
+
+# Test runtime components (currently implemented)
+uv run python -c "from src.titanax.runtime import MeshSpec, ProcessGroups; print('Runtime components working')"
 ```
 
 ## Code Style Guidelines
