@@ -33,6 +33,9 @@ uv run python examples/gpt_small_tp/train.py
 
 # Test runtime components (currently implemented)
 uv run python -c "from src.titanax.runtime import MeshSpec, ProcessGroups; print('Runtime components working')"
+
+# Test parallel plan components (currently implemented)
+uv run python -c "from src.titanax.parallel import DP, Plan; print('Parallel plan components working')"
 ```
 
 ## Code Style Guidelines
