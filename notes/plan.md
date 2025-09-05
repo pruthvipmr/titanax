@@ -21,10 +21,20 @@
 - Dev dependencies added: pytest, mypy, black, ruff for code quality
 - All directories include appropriate `__init__.py` files with descriptive comments
 
-### 0.2 Core Type Definitions
-- [ ] Create `titanax/types.py` with common type aliases (`PyTree`, etc.)
-- [ ] Define base exception classes in `titanax/exceptions.py`
-- [ ] Set up logging utilities in `titanax/logging/base.py`
+### 0.2 Core Type Definitions ✅ COMPLETED
+- [x] Create `titanax/types.py` with common type aliases (`PyTree`, etc.)
+- [x] Define base exception classes in `titanax/exceptions.py`
+- [x] Set up logging utilities in `titanax/logging/base.py`
+
+**Notes:**
+- Created comprehensive type system with JAX-specific aliases (Array, PyTree, Mesh, etc.)
+- Defined protocol-based interfaces for StepFunction, Logger, and CheckpointStrategy
+- Implemented hierarchical exception system with TitanaxError as base class
+- Added specialized exceptions for each component: MeshError, PlanError, CollectiveError, etc.
+- Exception classes include suggestion system for better error messages
+- Created robust logging base with BaseLogger ABC, MultiLogger for multiplexing, and NullLogger
+- Added utility functions for metric formatting and aggregation
+- All components follow typing best practices with runtime_checkable protocols
 
 ## Phase P0: Data Parallel Core (Milestone 1)
 

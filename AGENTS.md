@@ -42,6 +42,9 @@ uv run python examples/gpt_small_tp/train.py
 - **Comments**: Focus on why, not what. Document complex JAX transformations
 - **Functions**: Keep functions focused and testable, avoid side effects
 - **Style**: Don't ever use emojis in any code
+- **Types**: Use common types from `titanax.types` (PyTree, Array, etc.)
+- **Exceptions**: Raise specific Titanax exceptions with helpful suggestions
+- **Protocols**: Use `@runtime_checkable` protocols for interfaces
 
 ## Testing Instructions
 - **Unit tests**: Test individual components in isolation with clear assertions
@@ -55,13 +58,15 @@ uv run python examples/gpt_small_tp/train.py
 ```
 src/titanax/
 ├── __init__.py
+├── types.py         # Common type aliases and protocols
+├── exceptions.py    # Exception hierarchy with suggestions
 ├── runtime/         # Mesh, distributed init
 ├── parallel/        # Plans (DP/TP/PP), sharding rules
 ├── exec/            # Engine, collectives, step functions
 ├── optim/           # Optax adapters
 ├── io/              # Checkpointing (Orbax)
 ├── data/            # Dataloaders
-├── logging/         # Observability
+├── logging/         # Observability (base.py, basic.py, csv.py, tensorboard.py)
 └── launch/          # CLI launcher
 
 tests/
