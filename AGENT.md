@@ -44,11 +44,11 @@ uv run python -m pytest tests/integration/
 uv run python -m pytest tests/benchmarks/
 
 # Type checking
-mypy titanax/
+uv run mypy src/titanax/
 
 # Format code
-black titanax/ tests/ examples/
-ruff check titanax/ tests/ examples/
+uv run black src/ tests/ examples/
+uv run ruff check src/ tests/ examples/
 
 # Run examples
 uv run python examples/mnist_dp/train.py
@@ -57,7 +57,7 @@ uv run python examples/gpt_small_tp/train.py
 
 ## Project Structure
 ```
-titanax/
+src/titanax/
 ├── __init__.py
 ├── runtime/          # Mesh, distributed init
 ├── parallel/         # Plans (DP/TP/PP), sharding rules
@@ -67,6 +67,17 @@ titanax/
 ├── data/            # Dataloaders
 ├── logging/         # Observability
 └── launch/          # CLI launcher
+
+tests/
+├── unit/            # Component validation
+├── integration/     # End-to-end workflows  
+└── benchmarks/      # Performance validation
+
+examples/
+├── mnist_dp/        # MNIST Data Parallel example
+├── gpt_small_tp/    # GPT Tensor Parallel example
+├── gpt_small_pp/    # GPT Pipeline Parallel example
+└── configs/         # YAML configuration examples
 ```
 
 ## Key Concepts

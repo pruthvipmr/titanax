@@ -1,0 +1,27 @@
+[project]
+name = "titanax"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Pruthvi Rajaghatta", email = "pruthvi.pmr@gmail.com" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "jax>=0.7.1",
+    "optax>=0.2.5",
+    "orbax-checkpoint>=0.11.24",
+    "typer>=0.17.3",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "black>=25.1.0",
+    "mypy>=1.17.1",
+    "pytest>=8.4.2",
+    "ruff>=0.12.12",
+]
