@@ -60,6 +60,11 @@ class DataError(TitanaxError):
     pass
 
 
+class EngineError(TitanaxError):
+    """Raised when engine operations fail."""
+    pass
+
+
 class CompilationError(TitanaxError):
     """Raised when JAX compilation fails."""
     pass

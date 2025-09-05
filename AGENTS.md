@@ -39,6 +39,9 @@ uv run python -c "from src.titanax.parallel import DP, Plan; print('Parallel pla
 
 # Test collectives layer (currently implemented)
 uv run python -c "from src.titanax.exec import collectives; print('Collectives layer working')"
+
+# Test engine components (currently implemented)
+uv run python -c "from src.titanax.exec import Engine, Precision, TrainState, step_fn; print('Engine components working')"
 ```
 
 ## Code Style Guidelines
