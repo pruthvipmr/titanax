@@ -41,6 +41,7 @@ uv run python examples/gpt_small_tp/train.py
 - **Formatting**: Use `black` for code formatting, `ruff` for linting
 - **Comments**: Focus on why, not what. Document complex JAX transformations
 - **Functions**: Keep functions focused and testable, avoid side effects
+- **Style**: Don't ever use emojis in any code
 
 ## Testing Instructions
 - **Unit tests**: Test individual components in isolation with clear assertions
@@ -65,7 +66,7 @@ src/titanax/
 
 tests/
 ├── unit/            # Component validation
-├── integration/     # End-to-end workflows  
+├── integration/     # End-to-end workflows
 └── benchmarks/      # Performance validation
 
 examples/
