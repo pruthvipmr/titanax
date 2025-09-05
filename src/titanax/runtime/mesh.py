@@ -8,6 +8,7 @@ import dataclasses
 import math
 from typing import Optional, Tuple, List, Dict, Any, Union
 
+import numpy as np
 import jax
 import jax.sharding as sharding
 
@@ -202,7 +203,7 @@ class MeshSpec:
                 )
             
             # Reshape devices into mesh topology
-            device_array = jax.numpy.array(devices).reshape(shape)
+            device_array = np.array(devices).reshape(shape)
             
             mesh = sharding.Mesh(device_array, self.axes)
             return mesh
@@ -229,7 +230,7 @@ class MeshSpec:
                 f"MeshSpec: {len(self.axes)}-dimensional",
                 f"  Axes: {self.axes}",
                 f"  Shape: {shape}",
-                f"  Devices: {len(devices)} ({devices[0].device_kind if devices else 'unknown'})",
+                f"  Devices: {len(devices)} ({devices[0].platform if devices else 'unknown'})",
             ]
             
             # Add device layout visualization for small meshes
@@ -239,7 +240,7 @@ class MeshSpec:
                     device_ids = [f"D{d.id}" for d in devices]
                     lines.append(f"    {' '.join(device_ids)}")
                 elif len(shape) == 2:
-                    device_array = jax.numpy.array([f"D{d.id}" for d in devices]).reshape(shape)
+                    device_array = np.array([f"D{d.id}" for d in devices]).reshape(shape)
                     for row in device_array:
                         lines.append(f"    {' '.join(row)}")
             

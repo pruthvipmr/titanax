@@ -87,6 +87,14 @@ class TestTP:
         with pytest.raises(PlanError, match="Rule value must be tuple/list"):
             TP(axis="model", rules={"param": "invalid"})
     
+    def test_tp_validation_invalid_rule_elements(self):
+        """Test TP validation with invalid rule element types."""
+        with pytest.raises(PlanError, match="element 0 must be str or None"):
+            TP(axis="model", rules={"param": (123, None)})  # Integer instead of string
+        
+        with pytest.raises(PlanError, match="element 1 must be str or None"):
+            TP(axis="model", rules={"param": ("model", ["invalid"])})  # List instead of string
+    
     def test_tp_mesh_validation(self):
         """Test TP validation against mesh."""
         rules = {"transformer/attn/qkv/kernel": ("model", None)}

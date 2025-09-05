@@ -36,6 +36,9 @@ uv run python -c "from src.titanax.runtime import MeshSpec, ProcessGroups; print
 
 # Test parallel plan components (currently implemented)
 uv run python -c "from src.titanax.parallel import DP, Plan; print('Parallel plan components working')"
+
+# Test collectives layer (currently implemented)
+uv run python -c "from src.titanax.exec import collectives; print('Collectives layer working')"
 ```
 
 ## Code Style Guidelines

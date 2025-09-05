@@ -66,7 +66,7 @@ class ProcessGroups:
                 return jax.process_index() % self._axis_sizes[axis_name]
             
             # Convert flat index to mesh coordinates
-            mesh_coords = jax.numpy.unravel_index(device_index, self._mesh.shape)
+            mesh_coords = jnp.unravel_index(device_index, self._mesh.shape)
             axis_index = self._mesh.axis_names.index(axis_name)
             
             return int(mesh_coords[axis_index])

@@ -12,7 +12,7 @@ from ..types import AxisName
 from ..runtime.mesh import MeshSpec
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class DP:
     """Data Parallel plan specification.
     
@@ -75,7 +75,7 @@ class DP:
         return description
 
 
-@dataclasses.dataclass  
+@dataclasses.dataclass(frozen=True)
 class TP:
     """Tensor Parallel plan specification.
     
@@ -122,6 +122,14 @@ class TP:
                     f"Rule value must be tuple/list, got {type(partition_spec).__name__}",
                     "Use tuple of axis names or None for PartitionSpec"
                 )
+            
+            # Check each element is str or None
+            for i, element in enumerate(partition_spec):
+                if element is not None and not isinstance(element, str):
+                    raise plan_validation_error(
+                        f"Rule '{path_pattern}' element {i} must be str or None, got {type(element).__name__}",
+                        "PartitionSpec elements should be axis names (strings) or None"
+                    )
     
     def validate_with_mesh(self, mesh_spec: MeshSpec) -> None:
         """Validate TP configuration against a mesh specification.
@@ -159,7 +167,7 @@ class TP:
         return description
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class PP:
     """Pipeline Parallel plan specification.
     
@@ -227,7 +235,7 @@ class PP:
         return description
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class Plan:
     """Composite parallel execution plan.
     

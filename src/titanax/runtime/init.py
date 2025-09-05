@@ -9,7 +9,6 @@ import logging
 from typing import Optional, List, Dict, Any
 
 import jax
-from jax._src import distributed
 
 from ..exceptions import DistributedError
 from ..types import Device
@@ -97,6 +96,11 @@ def initialize_distributed(
     
     coordinator_address_with_port = f"{coordinator_address}:{coordinator_port}"
     
+    # Skip if already initialized
+    if jax.distributed.is_initialized():
+        logger.info("JAX distributed already initialized")
+        return
+    
     try:
         logger.info(f"Initializing JAX distributed: coordinator={coordinator_address_with_port}, "
                    f"process_count={process_count}, process_id={process_id}")
@@ -140,7 +144,7 @@ def enumerate_devices(
     
     if device_type is not None:
         device_type = device_type.lower()
-        devices = [d for d in devices if d.device_kind.lower() == device_type]
+        devices = [d for d in devices if d.platform.lower() == device_type]
     
     return devices
 
@@ -159,11 +163,11 @@ def get_device_info() -> Dict[str, Any]:
     global_by_type = {}
     
     for device in local_devices:
-        device_type = device.device_kind.lower()
+        device_type = device.platform.lower()
         local_by_type[device_type] = local_by_type.get(device_type, 0) + 1
         
     for device in global_devices:
-        device_type = device.device_kind.lower()
+        device_type = device.platform.lower()
         global_by_type[device_type] = global_by_type.get(device_type, 0) + 1
     
     return {

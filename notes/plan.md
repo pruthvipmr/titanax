@@ -58,13 +58,17 @@
 
 **Notes:**
 - Implemented comprehensive JAX distributed initialization with environment variable detection
-- MeshSpec supports automatic device enumeration ("all"), explicit device lists, and smart shape inference
+- Fixed JAX integration issues: removed private imports, added distributed initialization guards, fixed device.platform usage
+- MeshSpec supports automatic device enumeration ("all"), explicit device lists, and smart shape inference  
 - Shape inference handles partial specifications (None values) and balanced factorization for multi-axis meshes
+- Replaced jax.numpy with numpy in host-only code to avoid unnecessary JAX tracing
 - Added robust validation with helpful error messages and suggestions
 - ProcessGroups provides convenient axis-based process querying with fallback mechanisms
 - All components include detailed docstrings and error handling with TitanaxError hierarchy
 - Batch compatibility validation included in MeshSpec for data parallel training
 - Supports topology hints for future optimization (placeholder implementation)
+- Added basic unit test coverage for MeshSpec, distributed env detection, and device enumeration (12 tests)
+- Addresses Oracle feedback: JAX integration, device platform usage, host numpy usage, initialization guards
 
 ### P0.2 Data Parallel Plan ✅ COMPLETED
 - [x] **File: `titanax/parallel/plan.py`**
@@ -76,21 +80,37 @@
 **Notes:**
 - Implemented comprehensive DP dataclass with validation for axis names and accumulate_steps
 - Created full Plan composition system supporting DP, TP, and PP (stubs for TP/PP included for future)
+- Made all dataclasses immutable with frozen=True to prevent post-construction mutations
+- Enhanced TP validation to check rule element types (str or None) at construction time
 - Added robust validation with mesh compatibility checking and helpful error messages
 - Implemented describe() methods for debugging and plan inspection
 - Plan supports composition validation to prevent axis conflicts
 - Added utility methods: get_all_axes(), is_data_parallel_only(), has_microbatching()
-- Full unit test coverage with 25 passing tests
+- Full unit test coverage with 26 passing tests including new TP element validation tests
 - Follows Titanax exception hierarchy with specific PlanError types
-- Uses dataclasses following project conventions
+- Uses immutable frozen dataclasses following project conventions
+- Addresses Oracle feedback: immutability, early validation, enhanced test coverage
 
-### P0.3 Collectives Layer
-- [ ] **File: `titanax/exec/collectives.py`**
-  - [ ] Implement `psum()` with axis validation
-  - [ ] Implement `pmean()` with axis validation
-  - [ ] Add runtime checks for axis existence in current mesh
-  - [ ] Add tree shape compatibility validation
-  - [ ] Implement `all_gather()`, `reduce_scatter()`, `broadcast()` stubs
+### P0.3 Collectives Layer ✅ COMPLETED
+- [x] **File: `titanax/exec/collectives.py`**
+  - [x] Implement `psum()` with axis validation
+  - [x] Implement `pmean()` with axis validation
+  - [x] Add runtime checks for axis existence in current mesh
+  - [x] Add tree shape compatibility validation
+  - [x] Implement `all_gather()`, `reduce_scatter()`, `broadcast()` stubs
+
+**Notes:**
+- Implemented comprehensive collectives layer with proper JAX lax.psum/pmean wrappers
+- Added full axis validation: string type, non-empty, and mesh axis existence checking
+- Added global mesh context management (set_current_mesh/get_current_mesh) for execution engine integration
+- Implemented PyTree structure validation to ensure all leaves are JAX arrays
+- Created stub implementations for all_gather, reduce_scatter, broadcast, ppermute with warnings
+- All functions include proper error handling using CollectiveError hierarchy with error chaining
+- Comprehensive test suite with 19 passing tests covering validation, stubs, mesh context, and error cases
+- Functions must be called within JAX transformation contexts (shard_map, pmap) that support named axes
+- Updated exec package __init__.py to expose collectives namespace and mesh context functions
+- Follows project conventions: dataclasses, type hints, no emojis, helpful error messages
+- Addresses Oracle feedback: spec compliance, mesh validation, error chaining, future compatibility
 
 ### P0.4 Execution Engine Core
 - [ ] **File: `titanax/exec/engine.py`**
