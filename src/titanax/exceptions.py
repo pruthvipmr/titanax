@@ -75,6 +75,11 @@ class DistributedError(TitanaxError):
     pass
 
 
+class OptimizerError(TitanaxError):
+    """Raised when optimizer operations fail."""
+    pass
+
+
 # Convenience functions for common error patterns
 
 def mesh_validation_error(message: str, suggestion: str | None = None) -> MeshError:

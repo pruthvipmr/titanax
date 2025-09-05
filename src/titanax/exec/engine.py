@@ -5,7 +5,10 @@ for managing training loops with explicit parallelization.
 """
 
 import dataclasses
-from typing import Any, Dict, List, Optional, Union, Iterable
+from typing import Any, Dict, List, Optional, Union, Iterable, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..optim.optax_adapter import OptaxAdapter
 
 import jax
 import jax.numpy as jnp
@@ -19,6 +22,7 @@ from ..runtime.mesh import MeshSpec
 from ..parallel.plan import Plan
 from ..exceptions import EngineError
 from .collectives import set_current_mesh
+from .step_fn import update_rngs
 
 
 @dataclasses.dataclass(frozen=True)
@@ -93,31 +97,62 @@ class TrainState:
         opt_state: Optimizer state as a PyTree
         step: Current training step number
         rngs: Dictionary of named PRNG keys for different uses
+        _optimizer: Optional reference to the optimizer (set by Engine)
     """
     params: Params
     opt_state: OptState
     step: int
     rngs: Dict[str, Array]
+    _optimizer: Optional['OptaxAdapter'] = None
     
-    def apply_gradients(self, *, grads: PyTree, **kwargs) -> 'TrainState':
+    def apply_gradients(
+        self, 
+        *, 
+        grads: PyTree, 
+        optimizer: Optional['OptaxAdapter'] = None,
+        **kwargs
+    ) -> 'TrainState':
         """Apply gradients and return new training state.
-        
-        This is a placeholder method that will be properly implemented
-        when the optimizer integration is added.
         
         Args:
             grads: Gradients to apply
+            optimizer: Optional optimizer adapter (required if not set during creation)
             **kwargs: Additional arguments for optimizer
             
         Returns:
             New TrainState with updated parameters and optimizer state
         """
-        # This is a placeholder - will be implemented with optimizer integration
-        return dataclasses.replace(
-            self,
-            step=self.step + 1,
-            **kwargs
-        )
+        if optimizer is None:
+            optimizer = self._optimizer
+            
+        if optimizer is None:
+            raise EngineError(
+                "No optimizer provided for apply_gradients",
+                suggestion="Pass optimizer argument or ensure Engine has optimizer configured"
+            )
+        
+        try:
+            # Apply gradients using the optimizer
+            new_params, new_opt_state = optimizer.apply_gradients(
+                grads=grads,
+                opt_state=self.opt_state,
+                params=self.params,
+                step=self.step,
+                **kwargs
+            )
+            
+            return dataclasses.replace(
+                self,
+                params=new_params,
+                opt_state=new_opt_state,
+                step=self.step + 1
+            )
+            
+        except Exception as e:
+            raise EngineError(
+                f"Failed to apply gradients: {e}",
+                suggestion="Check that gradients and parameters have compatible shapes"
+            ) from e
     
     def replace(self, **kwargs) -> 'TrainState':
         """Return a copy of the state with specified fields replaced."""
@@ -126,15 +161,21 @@ class TrainState:
     def tree_flatten(self):
         """Flatten TrainState for JAX PyTree operations."""
         children = (self.params, self.opt_state, self.rngs)
-        aux_data = (self.step,)
+        aux_data = (self.step, self._optimizer)
         return children, aux_data
     
     @classmethod
     def tree_unflatten(cls, aux_data, children):
         """Unflatten TrainState from JAX PyTree operations."""
-        step, = aux_data
+        step, optimizer = aux_data
         params, opt_state, rngs = children
-        return cls(params=params, opt_state=opt_state, step=step, rngs=rngs)
+        return cls(
+            params=params, 
+            opt_state=opt_state, 
+            step=step, 
+            rngs=rngs, 
+            _optimizer=optimizer
+        )
 
 
 # Register TrainState as a JAX PyTree
@@ -164,7 +205,7 @@ class Engine:
         self,
         mesh: MeshSpec,
         plan: Plan,
-        optimizer: Any,  # Will be typed properly with optimizer integration
+        optimizer: 'OptaxAdapter',
         precision: Precision = Precision(),
         checkpoint: Optional[CheckpointStrategy] = None,
         loggers: Optional[List[Logger]] = None,
@@ -237,14 +278,24 @@ class Engine:
             rng = jax.random.PRNGKey(42)
             rngs = {'dropout': rng}
         
-        # Initialize optimizer state (placeholder)
-        opt_state = params  # This will be replaced with proper optimizer init
+        # Cast parameters to the target precision dtype
+        cast_params = self._cast_params_to_precision(params)
+        
+        # Initialize optimizer state
+        try:
+            opt_state = self.optimizer.init(cast_params)
+        except Exception as e:
+            raise EngineError(
+                f"Failed to initialize optimizer state: {e}",
+                suggestion="Check that parameters are valid JAX PyTrees"
+            ) from e
         
         return TrainState(
-            params=params,
+            params=cast_params,
             opt_state=opt_state,
             step=0,
-            rngs=rngs
+            rngs=rngs,
+            _optimizer=self.optimizer
         )
     
     def fit(
@@ -332,10 +383,29 @@ class Engine:
         if self._compiled_step_fn is None:
             raise EngineError("No step function registered")
         
-        # Execute the step function
-        new_state, metrics = self._compiled_step_fn(state, batch)
+        # Apply precision policy to batch if needed
+        processed_batch = self._apply_precision_policy(batch)
         
-        return new_state, metrics
+        # Update PRNG keys for this step
+        updated_rngs = update_rngs(state.rngs)
+        state_with_updated_rngs = state.replace(rngs=updated_rngs)
+        
+        # Execute the step function with optimizer integration
+        try:
+            new_state, metrics = self._compiled_step_fn(state_with_updated_rngs, processed_batch)
+            
+            # Add optimizer learning rate to metrics
+            current_lr = self.optimizer.get_learning_rate(new_state.step)
+            metrics = dict(metrics)  # Make a copy
+            metrics['learning_rate'] = current_lr
+            
+            return new_state, metrics
+            
+        except Exception as e:
+            raise EngineError(
+                f"Step execution failed at step {state.step}: {e}",
+                suggestion="Check step function implementation and data shapes"
+            ) from e
     
     def _log_metrics(self, metrics: LogDict, step: int) -> None:
         """Log metrics to all registered loggers."""
@@ -355,12 +425,81 @@ class Engine:
                 # Don't fail training due to logging errors
                 print(f"Warning: Logger failed: {e}")
     
+    def _apply_precision_policy(self, batch: BatchData) -> BatchData:
+        """Apply precision policy to batch data.
+        
+        Args:
+            batch: Input batch data
+            
+        Returns:
+            Batch data with precision policy applied
+        """
+        if self.precision.dtype == jnp.float32:
+            return batch  # No conversion needed
+        
+        def convert_arrays(x):
+            if isinstance(x, jax.Array) and jnp.issubdtype(x.dtype, jnp.floating):
+                return x.astype(self.precision.dtype)
+            return x
+        
+        return jax.tree_util.tree_map(convert_arrays, batch)
+    
+    def _cast_params_to_precision(self, params: Params) -> Params:
+        """Cast parameters to the target precision dtype.
+        
+        Args:
+            params: Input parameters
+            
+        Returns:
+            Parameters cast to precision.param_dtype
+        """
+        if self.precision.param_dtype == jnp.float32:
+            # No conversion needed if target is float32
+            return params
+        
+        def cast_param(x):
+            if isinstance(x, jax.Array) and jnp.issubdtype(x.dtype, jnp.floating):
+                return x.astype(self.precision.param_dtype)
+            return x
+        
+        return jax.tree_util.tree_map(cast_param, params)
+    
+    def apply_loss_scaling(self, loss: Array) -> Array:
+        """Apply loss scaling for fp16 training.
+        
+        Args:
+            loss: Unscaled loss value
+            
+        Returns:
+            Scaled loss for gradient computation
+        """
+        if self.precision.loss_scaling and self.precision.fp16:
+            # Simple fixed scaling factor (more sophisticated scaling can be added later)
+            scale_factor = 2**14  # Common starting point for loss scaling
+            return loss * scale_factor
+        return loss
+    
+    def scale_gradients(self, grads: PyTree) -> PyTree:
+        """Scale gradients for fp16 training with loss scaling.
+        
+        Args:
+            grads: Gradients to scale
+            
+        Returns:
+            Scaled gradients
+        """
+        if self.precision.loss_scaling and self.precision.fp16:
+            scale_factor = 2**14  # Must match loss scaling factor
+            return jax.tree_util.tree_map(lambda g: g / scale_factor, grads)
+        return grads
+    
     def describe(self) -> str:
         """Return a human-readable description of the engine configuration."""
         lines = [
             "Titanax Engine Configuration:",
             f"  Mesh: {self.mesh_spec.describe()}",
             f"  Plan: {self.plan.describe()}",
+            f"  Optimizer: {self.optimizer.describe()}",
             f"  Precision: {self.precision.describe()}",
             f"  Checkpoint: {'enabled' if self.checkpoint else 'disabled'}",
             f"  Loggers: {len(self.loggers)} configured",
