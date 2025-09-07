@@ -100,8 +100,8 @@ class TestTrainState:
         assert new_state.params == self.params  # unchanged
         assert state.step == 0  # original unchanged
     
-    def test_apply_gradients_placeholder(self):
-        """Test apply_gradients placeholder method."""
+    def test_apply_gradients_requires_optimizer(self):
+        """Test that apply_gradients requires an optimizer to be provided."""
         state = TrainState(
             params=self.params,
             opt_state=self.opt_state,
@@ -110,13 +110,13 @@ class TestTrainState:
         )
         
         grads = {"weight": jnp.ones((4, 4)), "bias": jnp.ones(4)}
-        new_state = state.apply_gradients(grads=grads)
         
-        # Should increment step
-        assert new_state.step == 11
-        # Other fields should be preserved
-        assert new_state.params == self.params
-        assert new_state.opt_state == self.opt_state
+        # Should raise error when no optimizer is provided
+        with pytest.raises(EngineError) as exc_info:
+            state.apply_gradients(grads=grads)
+        
+        assert "No optimizer provided" in str(exc_info.value)
+        assert "Pass optimizer argument" in str(exc_info.value)
 
 
 class TestStepFnDecorator:

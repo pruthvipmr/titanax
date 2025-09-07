@@ -45,6 +45,9 @@ uv run python -c "from src.titanax.exec import Engine, Precision, TrainState, st
 
 # Test optimizer integration (currently implemented)
 uv run python -c "from src.titanax.optim import adamw, sgd, OptaxAdapter; print('Optimizer integration working')"
+
+# Test logging components (currently implemented)
+uv run python -c "from src.titanax.logging import Basic, CompactBasic; print('Logging components working')"
 ```
 
 ## Code Style Guidelines
