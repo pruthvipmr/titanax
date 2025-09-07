@@ -48,6 +48,9 @@ uv run python -c "from src.titanax.optim import adamw, sgd, OptaxAdapter; print(
 
 # Test logging components (currently implemented)
 uv run python -c "from src.titanax.logging import Basic, CompactBasic; print('Logging components working')"
+
+# Test checkpoint system (currently implemented)
+uv run python -c "from src.titanax.io import OrbaxCheckpoint, CheckpointMetadata; print('Checkpoint system working')"
 ```
 
 ## Code Style Guidelines
@@ -82,7 +85,7 @@ src/titanax/
 ├── parallel/        # Plans (DP/TP/PP), sharding rules
 ├── exec/            # Engine, collectives, step functions
 ├── optim/           # Optax adapters
-├── io/              # Checkpointing (Orbax)
+├── io/              # Checkpointing (checkpoint.py, orbax_io.py) - IMPLEMENTED
 ├── data/            # Dataloaders
 ├── logging/         # Observability (base.py, basic.py, csv.py, tensorboard.py)
 └── launch/          # CLI launcher
