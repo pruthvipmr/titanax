@@ -51,6 +51,12 @@ uv run python -c "from src.titanax.logging import Basic, CompactBasic; print('Lo
 
 # Test checkpoint system (currently implemented)
 uv run python -c "from src.titanax.io import OrbaxCheckpoint, CheckpointMetadata; print('Checkpoint system working')"
+
+# Test main package integration (currently implemented)
+uv run python -c "import sys; sys.path.insert(0, 'src'); import titanax as tx; print(f'Titanax v{tx.__version__} package integration working')"
+
+# Validate package structure and syntax (works without dependencies)
+tools/quick_validation.py
 ```
 
 ## Code Style Guidelines
