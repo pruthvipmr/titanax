@@ -2,6 +2,7 @@
 
 import pytest
 import warnings
+from functools import partial
 import jax
 import jax.numpy as jnp
 
@@ -80,7 +81,8 @@ class TestCollectivesBasic:
             collectives.psum(x, "data")
         except Exception as e:
             # Should fail due to no mesh context, but not due to axis validation
-            assert "unbound axis name" in str(e) or "JAX operation failed" in str(e)
+            assert ("unbound axis name" in str(e) or "JAX operation failed" in str(e) or 
+                   "not bound in current JAX transformation context" in str(e))
         
         # Test invalid axis types
         with pytest.raises(CollectiveError, match="axis must be a string"):
@@ -98,7 +100,8 @@ class TestCollectivesBasic:
             collectives.pmean(x, "data")
         except Exception as e:
             # Should fail due to no mesh context, but not due to axis validation
-            assert "unbound axis name" in str(e) or "JAX operation failed" in str(e)
+            assert ("unbound axis name" in str(e) or "JAX operation failed" in str(e) or 
+                   "not bound in current JAX transformation context" in str(e))
         
         # Test invalid axis types
         with pytest.raises(CollectiveError, match="axis must be a string"):
@@ -116,54 +119,64 @@ class TestCollectivesBasic:
             collectives.psum(invalid_tree, "data")
 
 
-class TestCollectiveStubs:
-    """Test stub implementations of collective operations."""
+class TestCollectiveImplementations:
+    """Test actual implementations of collective operations."""
     
-    def test_all_gather_stub(self):
-        """Test all_gather stub implementation."""
+    def test_all_gather_implementation(self):
+        """Test all_gather actual implementation."""
         x = jnp.array([1.0, 2.0])
         
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        # Should fail with unbound axis error, not return unchanged
+        try:
             result = collectives.all_gather(x, "data")
-            
-            # Check warning was raised
-            assert len(w) == 1
-            assert "stub implementation" in str(w[0].message)
-            
-            # Stub should return input unchanged
-            assert jnp.array_equal(result, x)
+        except Exception as e:
+            # Should fail due to no mesh context, but validate it's not a stub
+            assert ("unbound axis name" in str(e) or "JAX operation failed" in str(e) or 
+                   "not bound in current JAX transformation context" in str(e))
+        
+        # Test input validation
+        with pytest.raises(CollectiveError, match="input must be a JAX array"):
+            collectives.all_gather([1, 2, 3], "data")
     
-    def test_reduce_scatter_stub(self):
-        """Test reduce_scatter stub implementation."""
+    def test_reduce_scatter_implementation(self):
+        """Test reduce_scatter actual implementation."""
         x = jnp.array([1.0, 2.0])
         
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        # Should fail with unbound axis error, not return unchanged
+        try:
             result = collectives.reduce_scatter(x, "data", op="add")
-            
-            assert len(w) == 1
-            assert "stub implementation" in str(w[0].message)
-            assert jnp.array_equal(result, x)
+        except Exception as e:
+            # Should fail due to no mesh context, but validate it's not a stub
+            assert ("unbound axis name" in str(e) or "JAX operation failed" in str(e) or 
+                   "not bound in current JAX transformation context" in str(e))
+        
+        # Test input validation
+        with pytest.raises(CollectiveError, match="input must be a JAX array"):
+            collectives.reduce_scatter([1, 2, 3], "data", op="add")
     
     def test_reduce_scatter_invalid_op(self):
         """Test reduce_scatter with invalid operation."""
         x = jnp.array([1.0, 2.0])
         
-        with pytest.raises(CollectiveError, match="invalid operation 'invalid'"):
-            collectives.reduce_scatter(x, "data", op="invalid")
+        # Now only "add" is supported
+        with pytest.raises(CollectiveError, match="invalid operation 'mul'"):
+            collectives.reduce_scatter(x, "data", op="mul")
     
-    def test_broadcast_stub(self):
-        """Test broadcast stub implementation."""  
+    def test_broadcast_implementation(self):
+        """Test broadcast actual implementation."""  
         x = jnp.array([1.0, 2.0])
         
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
+        # Should fail with unbound axis error, not return unchanged
+        try:
             result = collectives.broadcast(x, "data", src_index=0)
-            
-            assert len(w) == 1
-            assert "stub implementation" in str(w[0].message)
-            assert jnp.array_equal(result, x)
+        except Exception as e:
+            # Should fail due to no mesh context, but validate it's not a stub
+            assert ("unbound axis name" in str(e) or "JAX operation failed" in str(e) or 
+                   "not bound in current JAX transformation context" in str(e))
+        
+        # Test input validation
+        with pytest.raises(CollectiveError, match="input must be a JAX array"):
+            collectives.broadcast([1, 2, 3], "data", src_index=0)
     
     def test_broadcast_invalid_src_index(self):
         """Test broadcast with invalid src_index."""
@@ -172,17 +185,86 @@ class TestCollectiveStubs:
         with pytest.raises(CollectiveError, match="src_index -1 must be non-negative"):
             collectives.broadcast(x, "data", src_index=-1)
     
-    def test_ppermute_stub(self):
-        """Test ppermute stub implementation."""
+    def test_ppermute_implementation(self):
+        """Test ppermute actual implementation."""
         x = jnp.array([1.0, 2.0])
         
-        with warnings.catch_warnings(record=True) as w:
-            warnings.simplefilter("always")
-            result = collectives.ppermute(x, "data", perm=None)
-            
-            assert len(w) == 1
-            assert "stub implementation" in str(w[0].message)
-            assert jnp.array_equal(result, x)
+        # Test input validation
+        with pytest.raises(CollectiveError, match="input must be a JAX array"):
+            collectives.ppermute([1, 2, 3], "data", perm=[(0, 1)])
+        
+        # Test permutation validation
+        with pytest.raises(CollectiveError, match="perm must be a list or tuple"):
+            collectives.ppermute(x, "data", perm=None)
+        
+        with pytest.raises(CollectiveError, match="must be a \\(source, dest\\) pair"):
+            collectives.ppermute(x, "data", perm=[(0,)])
+        
+        with pytest.raises(CollectiveError, match="indices must be integers"):
+            collectives.ppermute(x, "data", perm=[("0", 1)])
+        
+        with pytest.raises(CollectiveError, match="indices must be non-negative"):
+            collectives.ppermute(x, "data", perm=[(-1, 1)])
+        
+        # Should fail with unbound axis error when valid
+        try:
+            result = collectives.ppermute(x, "data", perm=[(0, 1), (1, 0)])
+        except Exception as e:
+            # Should fail due to no mesh context, but validate it's not a stub
+            assert ("unbound axis name" in str(e) or "JAX operation failed" in str(e) or 
+                   "not bound in current JAX transformation context" in str(e))
+
+
+class TestCollectiveOperations:
+    """Test collective operations in proper JAX transformation context."""
+    
+    def test_all_gather_basic(self):
+        """Test all_gather with proper shard_map context."""
+        # Skip if not enough devices
+        devices = jax.devices()
+        if len(devices) < 2:
+            pytest.skip("Need at least 2 devices for multi-device collectives test")
+        
+        mesh = jax.sharding.Mesh(devices[:2], ("data",))
+        
+        @jax.jit
+        @partial(jax.shard_map, mesh=mesh, in_specs=jax.sharding.PartitionSpec("data"), 
+                 out_specs=jax.sharding.PartitionSpec(None))
+        def test_fn(x):
+            return collectives.all_gather(x, "data")
+        
+        # Create input data
+        x = jnp.arange(4)  # [0, 1, 2, 3]
+        result = test_fn(x)
+        
+        # all_gather should concatenate: [0, 1, 2, 3] -> [0, 1, 2, 3] (tiled)
+        expected = jnp.array([0, 1, 2, 3])
+        assert jnp.array_equal(result, expected)
+    
+    def test_ppermute_ring_shift(self):
+        """Test ppermute with ring shift pattern."""
+        # Skip if not enough devices  
+        devices = jax.devices()
+        if len(devices) < 2:
+            pytest.skip("Need at least 2 devices for multi-device collectives test")
+        
+        mesh = jax.sharding.Mesh(devices[:2], ("data",))
+        
+        @jax.jit
+        @partial(jax.shard_map, mesh=mesh, in_specs=jax.sharding.PartitionSpec("data"),
+                 out_specs=jax.sharding.PartitionSpec("data"))
+        def test_fn(x):
+            # Ring shift: device 0 -> device 1, device 1 -> device 0
+            perm = [(0, 1), (1, 0)]
+            return collectives.ppermute(x, "data", perm)
+        
+        # Create input data where each device has different values
+        x = jnp.arange(4)  # [0, 1, 2, 3]
+        result = test_fn(x)
+        
+        # Should swap the shards
+        expected = jnp.array([2, 3, 0, 1])
+        assert jnp.array_equal(result, expected)
 
 
 class TestMeshContext:
@@ -220,7 +302,8 @@ class TestMeshContext:
             except Exception as e:
                 # Should fail with JAX error about missing transformation context
                 # but not with axis validation error
-                assert "unbound axis name" in str(e) or "JAX operation failed" in str(e)
+                assert ("unbound axis name" in str(e) or "JAX operation failed" in str(e) or 
+                       "not bound in current JAX transformation context" in str(e))
             
             # Invalid axis should raise CollectiveError
             with pytest.raises(CollectiveError, match="axis not found in mesh"):

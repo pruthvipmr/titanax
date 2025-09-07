@@ -5,25 +5,43 @@ PRNG management, gradient accumulation, and other training utilities.
 """
 
 import functools
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Optional, Union
 
 import jax
 import jax.numpy as jnp
+from jax import lax
+try:
+    from jax.experimental import pjit
+    from jax.experimental.shard_map import shard_map
+except (ImportError, AttributeError):
+    # In newer JAX versions, pjit is in the main module
+    try:
+        from jax import pjit  # type: ignore
+        from jax.experimental.shard_map import shard_map
+    except (ImportError, AttributeError):
+        # Fallback if neither location works
+        pjit = None  # type: ignore
+        from jax.experimental.shard_map import shard_map
 
 from ..types import StepFunction, PyTree, Array, BatchData, LogDict, StepOutput
 from ..exceptions import EngineError
 
 
 def step_fn(
+    func: Optional[StepFunction] = None,
+    *,
     donate_argnums: tuple[int, ...] = (0,),
     static_argnums: tuple[int, ...] = (),
     device: Optional[jax.Device] = None,
-) -> Callable[[StepFunction], StepFunction]:
-    """Decorator to create a compiled training step function.
+) -> Union[StepFunction, Callable[[StepFunction], StepFunction]]:
+    """Decorator to mark a function as a training step function.
+    
+    This decorator marks the function for compilation by the Engine.
+    The actual compilation with mesh context happens when the Engine
+    calls register_step_fn().
     
     This decorator handles:
-    - JIT compilation with appropriate donation and static arguments
-    - PRNG key management and threading
+    - Marking function as a step function
     - Input/output validation
     - Error handling with helpful messages
     
@@ -33,7 +51,7 @@ def step_fn(
         device: Target device for compilation (None for automatic placement)
         
     Returns:
-        Decorator function that wraps step functions with compilation and management
+        Decorator function that wraps step functions with validation
         
     Example:
         ```python
@@ -52,14 +70,6 @@ def step_fn(
     
     def decorator(func: StepFunction) -> StepFunction:
         """Apply the step function decoration."""
-        
-        # Create JIT compiled version of just the core function
-        compiled_core = jax.jit(
-            func,
-            donate_argnums=donate_argnums,
-            static_argnums=static_argnums,
-            device=device
-        )
         
         @functools.wraps(func)
         def wrapper(state: PyTree, batch: BatchData) -> StepOutput:
@@ -80,8 +90,8 @@ def step_fn(
                 )
             
             try:
-                # Execute the compiled step function
-                new_state, metrics = compiled_core(state, batch)
+                # Execute the original step function
+                new_state, metrics = func(state, batch)
                 
                 # Output validation and metric processing (outside JIT)
                 if not isinstance(metrics, dict):
@@ -119,26 +129,100 @@ def step_fn(
                     suggestion="Check your step function implementation for errors"
                 ) from e
         
-        compiled_fn = wrapper
+        # Store compilation parameters and original function for Engine to use
+        wrapper._original_fn = func  # type: ignore
+        wrapper._is_step_fn = True  # type: ignore
+        wrapper._compile_params = {  # type: ignore
+            'donate_argnums': donate_argnums,
+            'static_argnums': static_argnums,
+            'device': device
+        }
         
-        # Store original function for inspection
-        compiled_fn._original_fn = func  # type: ignore
-        compiled_fn._is_step_fn = True  # type: ignore
-        
-        return compiled_fn
+        return wrapper
     
+    # If func is provided, apply decoration directly (used as @step_fn)
+    if func is not None:
+        return decorator(func)
+    
+    # Otherwise, return decorator (used as @step_fn(...))
     return decorator
 
 
-def update_rngs(rngs: Dict[str, Array], keys: list[str] | None = None) -> Dict[str, Array]:
-    """Update PRNG keys for the next step.
+def compile_step_fn_with_mesh(
+    step_fn: StepFunction, 
+    mesh: jax.sharding.Mesh,
+    donate_argnums: tuple[int, ...] = (0,),
+    static_argnums: tuple[int, ...] = (),
+    device: Optional[jax.Device] = None,
+) -> StepFunction:
+    """Compile a step function with proper mesh context for collectives.
+    
+    This function compiles a step function using shard_map with the provided mesh,
+    enabling collective operations to work correctly.
+    
+    Args:
+        step_fn: The step function to compile
+        mesh: JAX mesh for distributed execution
+        donate_argnums: Argument indices to donate
+        static_argnums: Argument indices that are static
+        device: Target device for compilation
+        
+    Returns:
+        Compiled step function that works with mesh context
+    """
+    # Get the original function if it was decorated
+    original_fn = getattr(step_fn, '_original_fn', step_fn)
+    
+    # Use shard_map to enable collective operations
+    @functools.wraps(original_fn)
+    def shard_mapped_fn(state: PyTree, batch: BatchData) -> StepOutput:
+        """Execute step function with shard_map for collective support."""
+        
+        # Create a sharded function that allows collective operations
+        def sharded_step(state, batch):
+            return original_fn(state, batch)
+        
+        # Apply shard_map with the mesh
+        with mesh:
+            mapped_fn = shard_map(
+                sharded_step,
+                mesh=mesh,
+                in_specs=(jax.sharding.PartitionSpec(), jax.sharding.PartitionSpec()),
+                out_specs=(jax.sharding.PartitionSpec(), jax.sharding.PartitionSpec())
+            )
+            return mapped_fn(state, batch)
+    
+    # JIT the shard_mapped function for performance
+    compiled_fn = jax.jit(
+        shard_mapped_fn,
+        donate_argnums=donate_argnums,
+        static_argnums=static_argnums,
+    )
+    
+    return compiled_fn
+
+
+def update_rngs(
+    rngs: Dict[str, Array], 
+    keys: list[str] | None = None,
+    axis: str = 'batch'
+) -> Dict[str, Array]:
+    """Update PRNG keys for the next step with proper per-device handling.
+    
+    This function updates PRNG keys while maintaining device uniqueness in 
+    multi-device scenarios. Each device gets deterministic but unique RNG streams.
     
     Args:
         rngs: Current PRNG keys dictionary
         keys: List of keys to update (None to update all)
+        axis: Mesh axis name to use for device indexing
         
     Returns:
-        Dictionary with updated PRNG keys
+        Dictionary with updated per-device PRNG keys
+        
+    Note:
+        This function should be called inside a jitted function with mesh context
+        to ensure proper device-specific key generation.
     """
     if keys is None:
         keys = list(rngs.keys())
@@ -146,70 +230,223 @@ def update_rngs(rngs: Dict[str, Array], keys: list[str] | None = None) -> Dict[s
     new_rngs = {}
     for key, rng in rngs.items():
         if key in keys:
+            # Split and make device-unique using axis_index
             new_rng, _ = jax.random.split(rng)
-            new_rngs[key] = new_rng
+            # Fold in device index to ensure per-device uniqueness
+            try:
+                device_unique_rng = jax.random.fold_in(new_rng, jax.lax.axis_index(axis))
+                new_rngs[key] = device_unique_rng
+            except NameError:
+                # Fallback if not in mesh context (single device or initialization)
+                new_rngs[key] = new_rng
         else:
             new_rngs[key] = rng
     
     return new_rngs
 
 
-def split_rng(rng: Array, num: int = 2) -> tuple[Array, ...]:
-    """Split a PRNG key into multiple keys.
+def split_rng(rng: Array, num: int = 2, axis: str = 'batch') -> tuple[Array, ...]:
+    """Split a PRNG key into multiple per-device unique keys.
+    
+    This function splits a PRNG key while ensuring device uniqueness in
+    multi-device scenarios using axis_index and fold_in.
     
     Args:
         rng: Source PRNG key
         num: Number of keys to generate
+        axis: Mesh axis name for device indexing
         
     Returns:
-        Tuple of split PRNG keys
+        Tuple of split per-device PRNG keys
     """
-    return tuple(jax.random.split(rng, num))
+    # Split the key first
+    split_keys = jax.random.split(rng, num)
+    
+    # Make each split device-unique
+    try:
+        device_index = jax.lax.axis_index(axis)
+        device_keys = []
+        for i, key in enumerate(split_keys):
+            # Fold in both split index and device index for uniqueness
+            unique_key = jax.random.fold_in(key, device_index + i * 1000)
+            device_keys.append(unique_key)
+        return tuple(device_keys)
+    except NameError:
+        # Fallback if not in mesh context (single device or initialization)
+        return tuple(split_keys)
 
 
 def gradient_accumulation_step(
-    step_fn: StepFunction,
+    grad_fn: Callable,
+    apply_fn: Callable,
     state: PyTree,
     batches: list[BatchData],
     accumulate_steps: int
 ) -> StepOutput:
-    """Execute gradient accumulation across multiple microbatches.
+    """Execute gradient accumulation across multiple microbatches using JAX control flow.
     
-    This function is a placeholder for future gradient accumulation support.
-    It will be properly implemented when microbatching is fully supported.
+    This function uses jax.lax.scan to properly accumulate gradients across microbatches
+    within JIT-compiled code, avoiding Python loops that can't be optimized.
     
     Args:
-        step_fn: The base step function
-        state: Current training state  
-        batches: List of microbatch data
+        grad_fn: Function that computes gradients for a single microbatch: (params, batch) -> (loss, grads)
+        apply_fn: Function that applies gradients: (state, grads) -> new_state  
+        state: Current training state
+        batches: List of microbatch data (should have length >= accumulate_steps)
         accumulate_steps: Number of accumulation steps
         
     Returns:
         Tuple of (final_state, aggregated_metrics)
+        
+    Example:
+        ```python
+        def loss_and_grad_fn(params, batch):
+            loss = compute_loss(params, batch)
+            grads = jax.grad(compute_loss)(params, batch)
+            return loss, grads
+            
+        def apply_gradients_fn(state, accumulated_grads):
+            return state.apply_gradients(grads=accumulated_grads)
+            
+        state, metrics = gradient_accumulation_step(
+            loss_and_grad_fn, apply_gradients_fn, state, batches, 4
+        )
+        ```
     """
     if accumulate_steps == 1 or len(batches) == 1:
-        # No accumulation needed
-        return step_fn(state, batches[0])
+        # No accumulation needed - single step
+        loss, grads = grad_fn(state.params, batches[0])
+        new_state = apply_fn(state, grads)
+        return new_state, {"loss": loss}
     
-    # This is a placeholder implementation
-    # Future version will properly accumulate gradients across microbatches
-    accumulated_metrics = {}
-    current_state = state
+    # Take only the required number of microbatches
+    microbatches = batches[:accumulate_steps]
     
-    for i, batch in enumerate(batches[:accumulate_steps]):
-        current_state, metrics = step_fn(current_state, batch)
+    # Convert to JAX arrays for scan
+    batch_array = jax.tree_util.tree_map(
+        lambda *xs: jnp.stack(xs), *microbatches
+    )
+    
+    # Get initial gradients to establish the structure
+    _, init_grads = grad_fn(state.params, microbatches[0])
+    # Initialize with zeros to maintain structure
+    init_accumulated_grads = jax.tree_util.tree_map(jnp.zeros_like, init_grads)
+    
+    # Use JAX scan for proper gradient accumulation
+    def scan_fn(carry, batch):
+        """Inner function for lax.scan that accumulates gradients."""
+        accumulated_grads, total_loss, count = carry
         
-        # Simple metric averaging (will be more sophisticated)
-        if i == 0:
-            accumulated_metrics = metrics.copy()
-        else:
-            for key, value in metrics.items():
-                if key in accumulated_metrics:
-                    accumulated_metrics[key] = (accumulated_metrics[key] * i + value) / (i + 1)
-                else:
-                    accumulated_metrics[key] = value
+        # Compute loss and gradients for this microbatch
+        loss, grads = grad_fn(state.params, batch)
+        
+        # Accumulate gradients (tree_map handles PyTree structure)
+        accumulated_grads = jax.tree_util.tree_map(
+            lambda acc, new: acc + new, accumulated_grads, grads
+        )
+        
+        # Accumulate loss for averaging
+        total_loss += loss
+        count += 1
+        
+        return (accumulated_grads, total_loss, count), None
     
-    return current_state, accumulated_metrics
+    # Initialize carry state with proper gradient structure
+    init_carry = (init_accumulated_grads, 0.0, 0)
+    
+    # Run scan to accumulate gradients
+    (accumulated_grads, total_loss, count), _ = jax.lax.scan(
+        scan_fn, init_carry, batch_array
+    )
+    
+    # Average the accumulated gradients
+    averaged_grads = jax.tree_util.tree_map(
+        lambda g: g / accumulate_steps, accumulated_grads
+    )
+    
+    # Apply the averaged gradients
+    new_state = apply_fn(state, averaged_grads)
+    
+    # Compute average loss
+    avg_loss = total_loss / accumulate_steps
+    
+    return new_state, {"loss": avg_loss, "accumulate_steps": float(accumulate_steps)}
+
+
+def create_gradient_accumulation_step_fn(
+    loss_fn: Callable,
+    accumulate_steps: int = 1
+) -> StepFunction:
+    """Create a step function that performs gradient accumulation using JAX scan.
+    
+    This is a convenience function that creates the gradient and apply functions
+    and returns a complete step function ready for use with Engine.
+    
+    Args:
+        loss_fn: Function that computes loss: (params, batch) -> loss
+        accumulate_steps: Number of microbatches to accumulate over
+        
+    Returns:
+        Step function that can be used with Engine.fit()
+        
+    Example:
+        ```python
+        def loss_fn(params, batch):
+            logits = model_apply(params, batch['x'])
+            return cross_entropy(logits, batch['y'])
+        
+        # Create accumulating step function
+        step_fn = create_gradient_accumulation_step_fn(loss_fn, accumulate_steps=4)
+        
+        # Use with engine
+        engine.fit(step_fn, dataloader, state=state)
+        ```
+    """
+    if accumulate_steps == 1:
+        # No accumulation needed - return standard step function
+        @step_fn()
+        def simple_step(state, batch):
+            def compute_loss(params):
+                return loss_fn(params, batch)
+            
+            loss, grads = jax.value_and_grad(compute_loss)(state.params)
+            new_state = state.apply_gradients(grads=grads)
+            return new_state, {"loss": loss}
+        
+        return simple_step
+    
+    # Create accumulating step function
+    def grad_fn(params, batch):
+        """Compute loss and gradients for a single microbatch."""
+        loss = loss_fn(params, batch)
+        grads = jax.grad(loss_fn)(params, batch)
+        return loss, grads
+    
+    def apply_fn(state, grads):
+        """Apply accumulated gradients to state."""
+        return state.apply_gradients(grads=grads)
+    
+    @step_fn()
+    def accumulating_step(state, batch):
+        """Step function that accumulates gradients across microbatches."""
+        # For now, we need the batches to be provided as a list in batch['microbatches']
+        # This is a design choice - the dataloader should provide microbatches
+        if 'microbatches' not in batch:
+            raise EngineError(
+                "Gradient accumulation requires batch to contain 'microbatches' key",
+                suggestion="Modify your dataloader to provide microbatches or use accumulate_steps=1"
+            )
+        
+        microbatches = batch['microbatches']
+        if len(microbatches) < accumulate_steps:
+            raise EngineError(
+                f"Not enough microbatches: got {len(microbatches)}, need {accumulate_steps}",
+                suggestion="Ensure your dataloader provides enough microbatches per step"
+            )
+        
+        return gradient_accumulation_step(grad_fn, apply_fn, state, microbatches, accumulate_steps)
+    
+    return accumulating_step
 
 
 def is_step_fn(func: Any) -> bool:

@@ -204,8 +204,8 @@ class TestEngineOptimizerIntegration:
         batch = {'x': jnp.array([[1.0]]), 'y': jnp.array([1])}
         new_state, metrics = self.engine._execute_step(state, batch)
         
-        # Check that PRNG update was called
-        mock_update_rngs.assert_called_once_with(state.rngs)
+        # Check that PRNG update was called with the axis parameter
+        mock_update_rngs.assert_called_once_with(state.rngs, axis='data')
         
         # Check that step function received state with updated rngs
         call_args = mock_step_fn.call_args

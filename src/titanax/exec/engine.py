@@ -22,7 +22,8 @@ from ..runtime.mesh import MeshSpec
 from ..parallel.plan import Plan
 from ..exceptions import EngineError
 from .collectives import set_current_mesh
-from .step_fn import update_rngs
+from .step_fn import update_rngs, compile_step_fn_with_mesh
+from .prng import create_host_device_rngs, validate_rng_keys
 
 
 @dataclasses.dataclass(frozen=True)
@@ -243,7 +244,13 @@ class Engine:
     def _validate_plan(self) -> None:
         """Validate the parallel plan against the mesh specification."""
         try:
-            self.plan.validate(self.mesh_spec)
+            # Check if plan has validate method (for composite plans) or validate_with_mesh
+            if hasattr(self.plan, 'validate'):
+                self.plan.validate(self.mesh_spec)
+            elif hasattr(self.plan, 'validate_with_mesh'):
+                self.plan.validate_with_mesh(self.mesh_spec)
+            else:
+                raise AttributeError(f"Plan {type(self.plan)} has no validation method")
         except Exception as e:
             raise EngineError(
                 f"Plan validation failed: {e}",
@@ -256,27 +263,46 @@ class Engine:
         Args:
             step_fn: The step function to compile and use for training
         """
-        # This will be properly implemented when step_fn decorator is ready
-        self._compiled_step_fn = step_fn
+        # Get compilation parameters from the decorated function
+        compile_params = getattr(step_fn, '_compile_params', {})
+        donate_argnums = compile_params.get('donate_argnums', (0,))
+        static_argnums = compile_params.get('static_argnums', ())
+        device = compile_params.get('device', None)
+        
+        # Compile with proper mesh context for collectives
+        self._compiled_step_fn = compile_step_fn_with_mesh(
+            step_fn,
+            self._mesh,
+            donate_argnums=donate_argnums,
+            static_argnums=static_argnums,
+            device=device
+        )
     
     def create_state(
         self,
         params: Params,
-        rngs: Optional[Dict[str, Array]] = None
+        rngs: Optional[Dict[str, Array]] = None,
+        rng_seed: int = 42
     ) -> TrainState:
-        """Create initial training state.
+        """Create initial training state with proper per-device PRNG keys.
         
         Args:
             params: Initial model parameters
             rngs: Named PRNG keys, will create default 'dropout' key if None
+            rng_seed: Seed for default PRNG key generation
             
         Returns:
-            Initialized TrainState
+            Initialized TrainState with proper multi-device PRNG keys
         """
         if rngs is None:
-            # Create default PRNG keys
-            rng = jax.random.PRNGKey(42)
-            rngs = {'dropout': rng}
+            # Create default per-device PRNG keys using host-device utilities
+            rngs = create_host_device_rngs(
+                base_seed=rng_seed,
+                named_keys={'dropout': None}
+            )
+        
+        # Validate PRNG keys
+        validate_rng_keys(rngs)
         
         # Cast parameters to the target precision dtype
         cast_params = self._cast_params_to_precision(params)
@@ -298,12 +324,79 @@ class Engine:
             _optimizer=self.optimizer
         )
     
+    def step(self, state: TrainState, batch: BatchData) -> tuple[TrainState, LogDict]:
+        """Execute a single training step.
+        
+        Args:
+            state: Current training state
+            batch: Input batch data
+            
+        Returns:
+            Tuple of (updated_state, metrics)
+        """
+        if self._compiled_step_fn is None:
+            raise EngineError(
+                "No step function registered", 
+                suggestion="Call register_step_fn() or engine.fit() first"
+            )
+        
+        # Ensure mesh context is available for thread-local access
+        set_current_mesh(self._mesh)
+        
+        # Execute the step
+        return self._execute_step(state, batch)
+    
+    def save_checkpoint(self, state: TrainState, step: Optional[int] = None) -> None:
+        """Save training state to checkpoint.
+        
+        Args:
+            state: Training state to save
+            step: Optional step number (uses state.step if None)
+        """
+        if self.checkpoint is None:
+            raise EngineError(
+                "No checkpoint strategy configured",
+                suggestion="Configure checkpoint strategy in Engine constructor"
+            )
+        
+        step_number = step if step is not None else state.step
+        self.checkpoint.save(state, step_number)
+        self._log_scalar("checkpoint/saved_step", float(step_number), step_number)
+    
+    def load_checkpoint(self, step: Optional[int] = None) -> TrainState:
+        """Load training state from checkpoint.
+        
+        Args:
+            step: Optional step number to load (loads latest if None)
+            
+        Returns:
+            Loaded training state
+        """
+        if self.checkpoint is None:
+            raise EngineError(
+                "No checkpoint strategy configured", 
+                suggestion="Configure checkpoint strategy in Engine constructor"
+            )
+        
+        state = self.checkpoint.load(step)
+        
+        # Ensure state is a TrainState with proper attributes
+        if not hasattr(state, 'step'):
+            raise EngineError(
+                f"Loaded checkpoint is not a valid TrainState: {type(state)}",
+                suggestion="Check checkpoint format and ensure it was saved with current Titanax version"
+            )
+        
+        self._log_scalar("checkpoint/loaded_step", float(state.step), state.step)
+        return state
+    
     def fit(
         self,
         step_fn: StepFunction,
         data: Iterable[BatchData],
         steps: Optional[int] = None,
-        state: Optional[TrainState] = None
+        state: Optional[TrainState] = None,
+        continue_on_error: bool = False
     ) -> TrainState:
         """Run the training loop.
         
@@ -312,6 +405,8 @@ class Engine:
             data: Iterable of training data batches
             steps: Maximum number of steps to train (None for unlimited)
             state: Initial training state (None to create from checkpoint or error)
+            continue_on_error: If False (default), re-raise exceptions after logging.
+                             If True, continue training after logging errors.
             
         Returns:
             Final training state after training
@@ -336,23 +431,42 @@ class Engine:
                     suggestion="Either provide state parameter or configure checkpoint strategy"
                 )
         
+        # Ensure mesh context is available for thread-local access
+        set_current_mesh(self._mesh)
+        
         current_step = 0
         try:
             for batch in data:
                 if steps is not None and current_step >= steps:
                     break
                 
-                # Execute one training step
-                state, metrics = self._execute_step(state, batch)
-                current_step += 1
-                
-                # Log metrics
-                self._log_metrics(metrics, state.step)
-                
-                # Save checkpoint periodically (simplified logic)
-                if self.checkpoint is not None and state.step % 1000 == 0:
-                    self.checkpoint.save(state, state.step)
-                    self._log_scalar("checkpoint/saved_step", float(state.step), state.step)
+                try:
+                    # Execute one training step
+                    state, metrics = self._execute_step(state, batch)
+                    current_step += 1
+                    
+                    # Log metrics
+                    self._log_metrics(metrics, state.step)
+                    
+                    # Save checkpoint periodically (simplified logic)
+                    if self.checkpoint is not None and state.step % 1000 == 0:
+                        self.checkpoint.save(state, state.step)
+                        self._log_scalar("checkpoint/saved_step", float(state.step), state.step)
+                        
+                except Exception as step_error:
+                    # Log the error first
+                    error_msg = f"Step execution failed at step {state.step}: {step_error}"
+                    self._log_scalar("training/step_error", float(state.step), state.step)
+                    print(f"ERROR: {error_msg}")
+                    
+                    # Re-raise unless continue_on_error is True
+                    if not continue_on_error:
+                        raise EngineError(error_msg) from step_error
+                    else:
+                        # Continue training, but skip this step
+                        print(f"WARNING: Continuing training despite error at step {state.step}")
+                        current_step += 1
+                        continue
         
         except KeyboardInterrupt:
             self._log_scalar("training/interrupted", float(state.step), state.step)
@@ -360,8 +474,6 @@ class Engine:
                 self.checkpoint.save(state, state.step)
                 self._log_scalar("checkpoint/saved_step", float(state.step), state.step)
             raise
-        except Exception as e:
-            raise EngineError(f"Training failed at step {state.step}: {e}") from e
         
         # Final checkpoint save
         if self.checkpoint is not None:
@@ -370,12 +482,34 @@ class Engine:
         
         return state
     
+    def _get_batch_axis(self) -> str:
+        """Get the batch axis name for PRNG key updates.
+        
+        Returns the appropriate axis name from the mesh for per-device
+        PRNG key generation.
+        
+        Returns:
+            String name of the batch axis (defaults to 'batch' or 'data')
+        """
+        if self._mesh is not None:
+            mesh_axes = self._mesh.axis_names
+            # Look for common batch axis names
+            for axis_name in ['batch', 'data', 'dp']:
+                if axis_name in mesh_axes:
+                    return axis_name
+            # Fallback to first axis if no standard batch axis found
+            if mesh_axes:
+                return mesh_axes[0]
+        
+        # Default fallback
+        return 'batch'
+    
     def _execute_step(self, state: TrainState, batch: BatchData) -> tuple[TrainState, LogDict]:
-        """Execute a single training step.
+        """Execute a single training step with microbatch accumulation support.
         
         Args:
             state: Current training state
-            batch: Input batch data
+            batch: Input batch data (may contain 'microbatches' for gradient accumulation)
             
         Returns:
             Tuple of (updated_state, metrics)
@@ -386,8 +520,23 @@ class Engine:
         # Apply precision policy to batch if needed
         processed_batch = self._apply_precision_policy(batch)
         
-        # Update PRNG keys for this step
-        updated_rngs = update_rngs(state.rngs)
+        # Check if this plan uses microbatching and if batch contains microbatches
+        if (self.plan.has_microbatching() and 
+            hasattr(self.plan, 'data_parallel') and 
+            self.plan.data_parallel and 
+            self.plan.data_parallel.accumulate_steps > 1):
+            
+            # For DP microbatching, ensure batch has microbatches
+            if 'microbatches' not in processed_batch:
+                raise EngineError(
+                    f"DP plan requires microbatching (accumulate_steps={self.plan.data_parallel.accumulate_steps}) "
+                    "but batch does not contain 'microbatches' key",
+                    suggestion="Modify your dataloader to provide microbatches or set accumulate_steps=1"
+                )
+        
+        # Update PRNG keys for this step with proper per-device handling
+        # The axis parameter will be used inside the jitted function context
+        updated_rngs = update_rngs(state.rngs, axis=self._get_batch_axis())
         state_with_updated_rngs = state.replace(rngs=updated_rngs)
         
         # Execute the step function with optimizer integration
@@ -407,23 +556,46 @@ class Engine:
                 suggestion="Check step function implementation and data shapes"
             ) from e
     
-    def _log_metrics(self, metrics: LogDict, step: int) -> None:
-        """Log metrics to all registered loggers."""
+    def _log_metrics(self, metrics: LogDict, step: int, continue_on_error: bool = True) -> None:
+        """Log metrics to all registered loggers.
+        
+        Args:
+            metrics: Dictionary of metrics to log
+            step: Current training step
+            continue_on_error: If True, log warnings for errors but don't raise.
+                             If False, re-raise logging exceptions after warning.
+        """
         for logger in self.loggers:
             try:
                 logger.log_dict(metrics, step)
             except Exception as e:
-                # Don't fail training due to logging errors
+                # Always log the warning
                 print(f"Warning: Logger failed: {e}")
+                
+                # Re-raise if continue_on_error is False
+                if not continue_on_error:
+                    raise EngineError(f"Logging failed: {e}") from e
     
-    def _log_scalar(self, name: str, value: float, step: int) -> None:
-        """Log a scalar value to all registered loggers."""
+    def _log_scalar(self, name: str, value: float, step: int, continue_on_error: bool = True) -> None:
+        """Log a scalar value to all registered loggers.
+        
+        Args:
+            name: Metric name to log
+            value: Metric value to log
+            step: Current training step
+            continue_on_error: If True, log warnings for errors but don't raise.
+                             If False, re-raise logging exceptions after warning.
+        """
         for logger in self.loggers:
             try:
                 logger.log_scalar(name, value, step)
             except Exception as e:
-                # Don't fail training due to logging errors
+                # Always log the warning
                 print(f"Warning: Logger failed: {e}")
+                
+                # Re-raise if continue_on_error is False
+                if not continue_on_error:
+                    raise EngineError(f"Logging failed: {e}") from e
     
     def _apply_precision_policy(self, batch: BatchData) -> BatchData:
         """Apply precision policy to batch data.

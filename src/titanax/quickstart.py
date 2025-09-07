@@ -13,7 +13,7 @@ from .exec import Engine, Precision as _Precision
 from .optim import adamw
 from .logging import Basic
 from .io import OrbaxCheckpoint
-from .types import Logger, CheckpointStrategy, Optimizer
+from .types import Logger, CheckpointStrategy
 
 
 def simple_data_parallel(
@@ -22,7 +22,7 @@ def simple_data_parallel(
     precision: str = "bf16", 
     checkpoint_dir: Optional[str] = None,
     loggers: Optional[List[Logger]] = None,
-    optimizer: Optional[Optimizer] = None,
+    optimizer = None,
     devices: Union[str, List[jax.Device], None] = "all"
 ) -> Engine:
     """Create a simple data parallel training setup.

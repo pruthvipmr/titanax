@@ -76,9 +76,16 @@ from .parallel import (
 from .exec import (
     Engine,
     TrainState,
-    Precision as _Precision,
+    Precision,
     step_fn,
     collectives,
+    update_rngs,
+    split_rng,
+    create_per_device_rngs,
+    update_per_device_rngs,
+    split_per_device_rng,
+    validate_rng_keys,
+    create_host_device_rngs,
 )
 
 # Type system and exceptions
@@ -91,8 +98,6 @@ from .types import (
     Logger,
     CheckpointStrategy,
     StepFunction,
-    Optimizer,
-    Scheduler,
 )
 
 from .exceptions import (
@@ -146,6 +151,15 @@ __all__ = [
     "step_fn",
     "collectives",
     
+    # PRNG utilities
+    "update_rngs",
+    "split_rng",
+    "create_per_device_rngs",
+    "update_per_device_rngs",
+    "split_per_device_rng",
+    "validate_rng_keys",
+    "create_host_device_rngs",
+    
     # Type system
     "Array",
     "PyTree", 
@@ -155,8 +169,6 @@ __all__ = [
     "Logger",
     "CheckpointStrategy",
     "StepFunction",
-    "Optimizer",
-    "Scheduler",
     
     # Exceptions
     "TitanaxError",
@@ -177,24 +189,20 @@ __all__ = [
     "CheckpointMetadata",
 ]
 
-# Convenience aliases for common workflows
-class Precision:
-    """Convenience class for precision configuration."""
-    
-    @staticmethod
-    def bf16():
-        """BFloat16 mixed precision configuration."""
-        return _Precision(bfloat16=True)
-    
-    @staticmethod
-    def fp16():
-        """Float16 mixed precision configuration."""
-        return _Precision(fp16=True)
-    
-    @staticmethod
-    def fp32():
-        """Full precision (Float32) configuration."""
-        return _Precision()
+# Convenience functions for common precision configurations
+def bfloat16_precision():
+    """BFloat16 mixed precision configuration."""
+    return Precision(bfloat16=True)
 
-# Add precision convenience to exports
-__all__.append("Precision")
+def float16_precision():
+    """Float16 mixed precision configuration."""
+    return Precision(fp16=True)
+
+def float32_precision():
+    """Full precision (Float32) configuration."""
+    return Precision()
+
+# Aliases for backward compatibility
+bf16_precision = bfloat16_precision
+fp16_precision = float16_precision 
+fp32_precision = float32_precision

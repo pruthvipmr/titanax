@@ -3,6 +3,7 @@
 ## Project Overview
 Titanax is a lightweight JAX training framework that brings Hugging Face Accelerate/TorchTitan ergonomics to JAX with **explicit** parallelization. Users must declare meshes, sharding rules, and collectives - no XLA auto-sharding.
 
+
 ## Build & Test Commands
 ```bash
 # Install in development mode
@@ -54,6 +55,15 @@ uv run python -c "from src.titanax.io import OrbaxCheckpoint, CheckpointMetadata
 
 # Test main package integration (currently implemented)
 uv run python -c "import sys; sys.path.insert(0, 'src'); import titanax as tx; print(f'Titanax v{tx.__version__} package integration working')"
+
+# Test PRNG utilities (currently implemented)
+uv run python -c "from src.titanax.exec import prng; print('PRNG utilities working')"
+
+# Run P0 acceptance tests (MNIST-DP integration)
+uv run python tests/integration/test_mnist_dp_acceptance.py
+
+# Run comprehensive test suite with coverage summary
+uv run python -m pytest tests/ -v --tb=short --durations=10
 
 # Validate package structure and syntax (works without dependencies)
 tools/quick_validation.py
