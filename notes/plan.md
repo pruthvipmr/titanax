@@ -59,7 +59,7 @@
 **Notes:**
 - Implemented comprehensive JAX distributed initialization with environment variable detection
 - Fixed JAX integration issues: removed private imports, added distributed initialization guards, fixed device.platform usage
-- MeshSpec supports automatic device enumeration ("all"), explicit device lists, and smart shape inference  
+- MeshSpec supports automatic device enumeration ("all"), explicit device lists, and smart shape inference
 - Shape inference handles partial specifications (None values) and balanced factorization for multi-axis meshes
 - Replaced jax.numpy with numpy in host-only code to avoid unnecessary JAX tracing
 - Added robust validation with helpful error messages and suggestions
@@ -246,23 +246,7 @@ Oracle assessment: "High-quality skeleton code" with proper foundation for futur
 - Factory function supports multiple checkpoint backends (currently Orbax, extensible for future)
 - Addresses all requirements: sharded save/load, metadata, step naming, cleanup, validation
 
-### P0.8 Package Integration ✅ COMPLETED  
-- [x] **File: `titanax/__init__.py`**
-  - [x] Import and expose all P0 components
-  - [x] Create unified public API
-  - [x] Add convenience functions and aliases
-  - [x] Ensure proper __all__ exports
-
-**Notes:**
-- Complete package integration with all P0 components properly exposed
-- Fixed Precision class import issues (was shadowed by convenience wrapper)
-- Added convenience functions for common precision configurations
-- All core components accessible through main titanax namespace
-- Package validates successfully with integration tests
-
-## P0 PHASE COMPLETION & ORACLE CODE REVIEW ✅ COMPLETED
-
-### P0.9 Oracle Code Review & Critical Fixes ✅ COMPLETED
+### P0.8.5 Oracle Code Review & Critical Fixes ✅ COMPLETED
 
 **Oracle Assessment Summary:**
 The Oracle conducted a comprehensive code review and identified several critical issues preventing actual multi-device execution. All critical issues have been successfully resolved.
@@ -271,7 +255,7 @@ The Oracle conducted a comprehensive code review and identified several critical
 
 1. **Axis Context Mismatch** ✅ **FIXED**
    - **Problem**: `collectives.psum/pmean` called `jax.lax.psum` without proper mesh context
-   - **Solution**: Implemented thread-local mesh storage and `shard_map`-based compilation 
+   - **Solution**: Implemented thread-local mesh storage and `shard_map`-based compilation
    - **Files Modified**: `src/titanax/exec/collectives.py`, `src/titanax/exec/step_fn.py`, `src/titanax/exec/engine.py`
    - **Impact**: Multi-device collective operations now work correctly
 
@@ -354,7 +338,7 @@ The Oracle conducted a comprehensive code review and identified several critical
 - Package ready for use with single import: `import titanax as tx` exposes complete P0 API
 
 **Validation Results:**
-- ✅ Package structure: all required files/packages present (runtime, parallel, exec, optim, logging, io)  
+- ✅ Package structure: all required files/packages present (runtime, parallel, exec, optim, logging, io)
 - ✅ Syntax validation: all 26 Python files syntactically valid across all subpackages
 - ✅ Export validation: all 42 __all__ exports verified, key components (MeshSpec, Plan, Engine) accessible
 - ✅ Namespace validation: tx.optim.adamw, tx.loggers.Basic, tx.io.OrbaxCheckpoint all working
@@ -407,7 +391,7 @@ The Oracle conducted a comprehensive code review and identified several critical
 
 ## Phase P1: Tensor Parallel Core (Milestone 2)
 
-### P1.1 Tensor Parallel Plan  
+### P1.1 Tensor Parallel Plan
 - [ ] **File: `titanax/parallel/rules.py`**
   - [ ] Implement parameter path pattern matching
   - [ ] Add `PartitionSpec` creation from rules
