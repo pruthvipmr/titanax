@@ -64,28 +64,6 @@ tools/quick_validation.py
 - Mock external dependencies (checkpointing, logging) in unit tests
 - Test both single and multi-device scenarios where applicable
 
-## Implementation Status & Known Limitations
-
-### ✅ P0 MILESTONE COMPLETED: Data Parallel Core
-- **Complete**: Runtime, Plans, Collectives, Engine, Optimizer, Logging, Checkpointing, MNIST Example
-- **Testing**: 230+ unit tests, 4 integration tests, all P0 acceptance criteria validated
-- **Examples**: Working MNIST DP training with single/multi-device support
-
-### Current Limitations (P1+ Features)
-- **Multi-device compilation**: Mesh/plan validation works but compilation context not yet implemented
-  - Collectives (`psum/pmean`) require JAX transformation context with bound axes  
-  - Workaround: Conditional collectives (only call when dp_size > 1)
-- **Tensor Parallel**: TP rules defined but compilation integration pending
-- **Pipeline Parallel**: PP framework defined but 1F1B scheduler not implemented
-
-### Recent Bug Fixes & Implementation Notes
-- **ProcessGroups**: Fixed mesh.shape access (OrderedDict vs tuple indexing)
-- **Step Functions**: Must return `(state, metrics)` tuple for both train and eval steps
-- **CNN Models**: Fixed JAX convolution with proper NHWC/HWIO dimension specification  
-- **Import Issues**: Fixed optimizer/logger namespace access (`tx.optim.adamw`, `tx.loggers.Basic`)
-- **Checkpoint Loading**: Orbax integration working with proper metadata handling
-- **Precision Policies**: Parameter dtype casting and loss scaling implemented
-
 ## Project Structure
 ```
 src/titanax/
