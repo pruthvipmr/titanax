@@ -7,6 +7,7 @@ and process relationships across different axes.
 from typing import Dict
 
 import jax
+import jax.numpy as jnp
 
 from ..exceptions import MeshError, mesh_validation_error
 from ..types import Mesh, ProcessRank, WorldSize
@@ -35,7 +36,8 @@ class ProcessGroups:
     def _compute_axis_info(self) -> None:
         """Precompute size and rank information for all axes."""
         for axis_name in self._mesh.axis_names:
-            self._axis_sizes[axis_name] = self._mesh.shape[self._mesh.axis_names.index(axis_name)]
+            # mesh.shape is an OrderedDict, access by axis name directly
+            self._axis_sizes[axis_name] = self._mesh.shape[axis_name]
             self._axis_ranks[axis_name] = self._get_axis_rank(axis_name)
     
     def _get_axis_rank(self, axis_name: str) -> int:
@@ -66,7 +68,8 @@ class ProcessGroups:
                 return jax.process_index() % self._axis_sizes[axis_name]
             
             # Convert flat index to mesh coordinates
-            mesh_coords = jnp.unravel_index(device_index, self._mesh.shape)
+            mesh_shape_tuple = tuple(self._mesh.shape.values())
+            mesh_coords = jnp.unravel_index(device_index, mesh_shape_tuple)
             axis_index = self._mesh.axis_names.index(axis_name)
             
             return int(mesh_coords[axis_index])
@@ -174,7 +177,7 @@ class ProcessGroups:
             Human-readable string describing process groups
         """
         lines = ["ProcessGroups:"]
-        lines.append(f"  Mesh shape: {dict(zip(self._mesh.axis_names, self._mesh.shape))}")
+        lines.append(f"  Mesh shape: {dict(self._mesh.shape)}")
         lines.append(f"  Current process ranks:")
         
         for axis_name in self._mesh.axis_names:

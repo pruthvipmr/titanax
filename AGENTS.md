@@ -21,6 +21,9 @@ uv run python -m pytest tests/integration/
 # Run benchmarks
 uv run python -m pytest tests/benchmarks/
 
+# Run comprehensive test suite with coverage summary
+uv run python -m pytest tests/ -v --tb=short --durations=10
+
 # Type checking
 uv run mypy src/titanax/
 
@@ -29,41 +32,11 @@ uv run black src/ tests/ examples/
 uv run ruff check src/ tests/ examples/
 
 # Run examples
-uv run python examples/mnist_dp/train.py
+uv run python examples/mnist_dp/train.py --steps=100 --eval-every=25
+uv run python examples/mnist_dp/train.py --model=cnn --steps=50 --batch-size=128
+uv run python examples/mnist_dp/download_mnist.py
+uv run python examples/mnist_dp/test_synthetic.py
 uv run python examples/gpt_small_tp/train.py
-
-# Test runtime components (currently implemented)
-uv run python -c "from src.titanax.runtime import MeshSpec, ProcessGroups; print('Runtime components working')"
-
-# Test parallel plan components (currently implemented)
-uv run python -c "from src.titanax.parallel import DP, Plan; print('Parallel plan components working')"
-
-# Test collectives layer (currently implemented)
-uv run python -c "from src.titanax.exec import collectives; print('Collectives layer working')"
-
-# Test engine components (currently implemented)
-uv run python -c "from src.titanax.exec import Engine, Precision, TrainState, step_fn; print('Engine components working')"
-
-# Test optimizer integration (currently implemented)
-uv run python -c "from src.titanax.optim import adamw, sgd, OptaxAdapter; print('Optimizer integration working')"
-
-# Test logging components (currently implemented)
-uv run python -c "from src.titanax.logging import Basic, CompactBasic; print('Logging components working')"
-
-# Test checkpoint system (currently implemented)
-uv run python -c "from src.titanax.io import OrbaxCheckpoint, CheckpointMetadata; print('Checkpoint system working')"
-
-# Test main package integration (currently implemented)
-uv run python -c "import sys; sys.path.insert(0, 'src'); import titanax as tx; print(f'Titanax v{tx.__version__} package integration working')"
-
-# Test PRNG utilities (currently implemented)
-uv run python -c "from src.titanax.exec import prng; print('PRNG utilities working')"
-
-# Run P0 acceptance tests (MNIST-DP integration)
-uv run python tests/integration/test_mnist_dp_acceptance.py
-
-# Run comprehensive test suite with coverage summary
-uv run python -m pytest tests/ -v --tb=short --durations=10
 
 # Validate package structure and syntax (works without dependencies)
 tools/quick_validation.py
@@ -90,6 +63,21 @@ tools/quick_validation.py
 - Use `pytest` fixtures for common test setup (devices, meshes, data)
 - Mock external dependencies (checkpointing, logging) in unit tests
 - Test both single and multi-device scenarios where applicable
+
+## Known Limitations & Bug Fixes
+
+### P0 Implementation Status (Data Parallel Core)
+- **Complete**: Runtime, Plans, Collectives, Engine, Optimizer, Logging, Checkpointing, MNIST Example
+- **Known Limitation**: Multi-device training requires mesh-aware compilation (P1 milestone)
+  - Current Engine validates mesh/plan but doesn't apply them for JAX compilation context
+  - Collectives (`psum/pmean`) require JAX transformation context with bound axes
+  - Workaround: Conditional collectives (only call when dp_size > 1) for single-device testing
+
+### Recent Bug Fixes
+- **ProcessGroups**: Fixed mesh.shape access (OrderedDict vs tuple indexing)
+- **Step Functions**: Must return `(state, metrics)` tuple for both train and eval steps
+- **CNN Models**: Fixed JAX convolution with proper NHWC/HWIO dimension specification
+- **Import Issues**: Fixed optimizer/logger namespace access (`tx.optim.adamw`, `tx.loggers.Basic`)
 
 ## Project Structure
 ```
