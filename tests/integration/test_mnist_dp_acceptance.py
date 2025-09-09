@@ -305,7 +305,9 @@ def test_mnist_microbatch_accumulation():
         
         return batches
     
-    train_data = create_microbatch_data(num_batches=3)
+    # Use a few more steps to make the loss trend robust on synthetic data.
+    # With random inputs/labels, 3 steps can show non-monotonic behavior.
+    train_data = create_microbatch_data(num_batches=5)
     
     # Test without microbatching first (accumulate_steps=1)
     mesh = tx.MeshSpec(devices="all", axes=("data",))
