@@ -5,6 +5,7 @@ This module provides type aliases and protocols used throughout the Titanax fram
 
 from typing import Any, Dict, Tuple, Union, Protocol, runtime_checkable
 import jax
+from .compat import PartitionSpec, Mesh, NamedSharding, sharding_module
 
 # JAX/PyTree type aliases
 PyTree = Any  # JAX PyTree - nested structure of arrays
@@ -15,13 +16,10 @@ ArrayTree = PyTree  # PyTree containing JAX arrays
 Shape = Tuple[int, ...]
 Axis = Union[str, int]
 AxisName = str
-PartitionSpec = jax.sharding.PartitionSpec
 
 # Device and sharding types
 Device = jax.Device
-Mesh = jax.sharding.Mesh
-Sharding = jax.sharding.Sharding
-NamedSharding = jax.sharding.NamedSharding
+Sharding = sharding_module.Sharding if sharding_module and hasattr(sharding_module, 'Sharding') else None
 
 # Parameter and gradient types
 Params = PyTree

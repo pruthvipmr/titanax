@@ -9,7 +9,7 @@ import math
 from typing import Optional, Tuple, List, Dict, Any, Union
 
 import numpy as np
-import jax.sharding as sharding
+from ..compat import sharding_module as sharding
 
 from ..exceptions import MeshError, mesh_validation_error
 from ..types import Device, Mesh
@@ -92,6 +92,13 @@ class MeshSpec:
                 "No devices available", "Ensure JAX can access at least one device"
             )
 
+        # Sort devices deterministically to ensure consistent ordering across hosts
+        # Use lexicographic ordering by (platform, process_index, id) for stability
+        devices = sorted(
+            devices, 
+            key=lambda d: (d.platform, d.process_index, d.id)
+        )
+
         return devices
 
     def _infer_shape(self, devices: List[Device]) -> Tuple[int, ...]:
@@ -148,18 +155,21 @@ class MeshSpec:
     def _factorize_device_count(
         self, device_count: int, num_factors: Optional[int] = None
     ) -> Tuple[int, ...]:
-        """Factorize device count into balanced dimensions."""
+        """Factorize device count into balanced dimensions.
+        
+        Uses deterministic algorithm to ensure consistent results across hosts.
+        """
         if num_factors is None:
             num_factors = len(self.axes)
 
         if num_factors == 1:
             return (device_count,)
 
-        # Find factors of device_count
+        # Find prime factors of device_count in deterministic order
         factors = []
         temp = device_count
 
-        # Start with small factors and work up
+        # Start with small factors and work up deterministically
         for i in range(2, int(math.sqrt(device_count)) + 1):
             while temp % i == 0:
                 factors.append(i)
@@ -171,13 +181,15 @@ class MeshSpec:
         while len(factors) < num_factors:
             factors.append(1)
 
-        # If too many factors, combine smallest ones
+        # If too many factors, combine smallest ones deterministically
         while len(factors) > num_factors:
-            factors.sort()
+            factors.sort()  # Ensure deterministic ordering
             factors[0] = factors[0] * factors[1]
             factors.pop(1)
 
-        factors.sort(reverse=True)  # Largest first for better load balancing
+        # Sort in descending order for balanced load distribution
+        # This ensures larger dimensions come first consistently
+        factors.sort(reverse=True)
         return tuple(factors)
 
     def build(self) -> Mesh:

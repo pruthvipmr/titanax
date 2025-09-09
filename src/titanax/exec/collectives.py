@@ -11,7 +11,7 @@ from typing import Optional
 import threading
 
 import jax
-from jax import lax
+from ..compat import psum, pmean, all_gather, ppermute, psum_scatter
 
 from ..types import PyTree, Array, AxisName
 from ..exceptions import CollectiveError, collective_error
@@ -21,7 +21,7 @@ from ..exceptions import CollectiveError, collective_error
 _thread_local = threading.local()
 
 
-def set_current_mesh(mesh: Optional[jax.sharding.Mesh]) -> None:
+def set_current_mesh(mesh: Optional["Mesh"]) -> None:
     """Set the current mesh for collective validation.
 
     This is called by the execution engine to provide mesh context
@@ -34,7 +34,7 @@ def set_current_mesh(mesh: Optional[jax.sharding.Mesh]) -> None:
     _thread_local.current_mesh = mesh
 
 
-def get_current_mesh() -> Optional[jax.sharding.Mesh]:
+def get_current_mesh() -> Optional["Mesh"]:
     """Get the current mesh for collective validation.
 
     Returns:
@@ -44,7 +44,7 @@ def get_current_mesh() -> Optional[jax.sharding.Mesh]:
 
 
 def _validate_axis_name(
-    axis: AxisName, operation: str, mesh: Optional[jax.sharding.Mesh] = None
+    axis: AxisName, operation: str, mesh: Optional["Mesh"] = None
 ) -> None:
     """Validate axis name and optionally check mesh compatibility.
 
@@ -138,7 +138,7 @@ class collectives:
         _validate_tree_structure(tree, "psum", axis)
 
         try:
-            return lax.psum(tree, axis_name=axis)
+            return psum(tree, axis_name=axis)
         except Exception as e:
             # Provide more helpful error message for common axis binding issues
             error_msg = str(e)
@@ -183,7 +183,7 @@ class collectives:
         _validate_tree_structure(tree, "pmean", axis)
 
         try:
-            return lax.pmean(tree, axis_name=axis)
+            return pmean(tree, axis_name=axis)
         except Exception as e:
             # Provide more helpful error message for common axis binding issues
             error_msg = str(e)
@@ -288,7 +288,7 @@ class collectives:
 
         try:
             # Use psum_scatter with tiled=True for reduce-scatter behavior
-            return lax.psum_scatter(x, axis_name=axis, tiled=True)
+            return psum_scatter(x, axis_name=axis, tiled=True)
         except Exception as e:
             error_msg = str(e)
             if "unbound axis name" in error_msg.lower():

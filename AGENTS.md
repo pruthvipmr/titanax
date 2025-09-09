@@ -64,6 +64,7 @@ uv run python -m pytest tests/ -v --tb=short
 - **Data structures**: Prefer `dataclasses` over `pydantic` for simplicity
 - **Naming**: Use snake_case for functions/variables, PascalCase for classes
 - **Imports**: Group stdlib, third-party, local imports with blank lines between
+- **JAX Compatibility**: Always use `from titanax.compat import ...` for JAX APIs that change between versions (pjit, shard_map, sharding types, collectives)
 - **Static shapes**: Use static shapes to avoid JAX recompiles
 - **Formatting**: Use `black` for code formatting, `ruff` for linting
 - **Comments**: Focus on why, not what. Document complex JAX transformations
@@ -86,7 +87,8 @@ uv run python -m pytest tests/ -v --tb=short
 src/titanax/
 ├── __init__.py
 ├── types.py         # Common type aliases and protocols
-├── exceptions.py    # Exception hierarchy with suggestions
+├── exceptions.py    # Exception hierarchy with suggestions  
+├── compat.py        # JAX version compatibility layer - IMPLEMENTED
 ├── runtime/         # Mesh, distributed init
 ├── parallel/        # Plans (DP/TP/PP), sharding rules
 ├── exec/            # Engine, collectives, step functions

@@ -167,6 +167,14 @@ class ProcessGroups:
                 f"Axis '{axis}' not found in mesh", f"Available axes: {available_axes}"
             )
 
+    def coords(self) -> Dict[str, int]:
+        """Get current process coordinates across all mesh axes.
+
+        Returns:
+            Dictionary mapping axis names to current process rank along each axis
+        """
+        return {axis_name: rank for axis_name, rank in self._axis_ranks.items()}
+
     def describe(self) -> str:
         """Generate a description of process group information.
 
@@ -175,11 +183,12 @@ class ProcessGroups:
         """
         lines = ["ProcessGroups:"]
         lines.append(f"  Mesh shape: {dict(self._mesh.shape)}")
-        lines.append("  Current process ranks:")
+        lines.append("  Current process coordinates:")
 
+        coords = self.coords()
         for axis_name in self._mesh.axis_names:
             size = self._axis_sizes[axis_name]
-            rank = self._axis_ranks[axis_name]
+            rank = coords[axis_name]
             lines.append(f"    {axis_name}: {rank}/{size-1} (size={size})")
 
         lines.append(f"  Global process: {jax.process_index()}/{jax.process_count()-1}")

@@ -72,6 +72,9 @@ from .parallel import (
     PP,  # Note: stub implementation
 )
 
+# Compatibility layer
+from . import compat
+
 # Execution engine
 from .exec import (
     Engine,
@@ -147,6 +150,7 @@ __all__ = [
     "Precision",
     "step_fn",
     "collectives",
+    "compat",
     # PRNG utilities
     "update_rngs",
     "split_rng",

@@ -10,18 +10,7 @@ from typing import Any, Callable, Dict, Optional, Union
 import jax
 import jax.numpy as jnp
 
-try:
-    from jax.experimental import pjit
-    from jax.experimental.shard_map import shard_map
-except (ImportError, AttributeError):
-    # In newer JAX versions, pjit is in the main module
-    try:
-        from jax import pjit  # type: ignore
-        from jax.experimental.shard_map import shard_map
-    except (ImportError, AttributeError):
-        # Fallback if neither location works
-        pjit = None  # type: ignore
-        from jax.experimental.shard_map import shard_map
+from ..compat import pjit, shard_map, PartitionSpec
 
 from ..types import StepFunction, PyTree, Array, BatchData, StepOutput
 from ..exceptions import EngineError
@@ -154,7 +143,7 @@ def step_fn(
 
 def compile_step_fn_with_mesh(
     step_fn: StepFunction,
-    mesh: jax.sharding.Mesh,
+    mesh: "Mesh",
     donate_argnums: tuple[int, ...] = (0,),
     static_argnums: tuple[int, ...] = (),
     device: Optional[jax.Device] = None,
@@ -191,8 +180,8 @@ def compile_step_fn_with_mesh(
             mapped_fn = shard_map(
                 sharded_step,
                 mesh=mesh,
-                in_specs=(jax.sharding.PartitionSpec(), jax.sharding.PartitionSpec()),
-                out_specs=(jax.sharding.PartitionSpec(), jax.sharding.PartitionSpec()),
+                in_specs=(PartitionSpec(), PartitionSpec()),
+                out_specs=(PartitionSpec(), PartitionSpec()),
             )
             return mapped_fn(state, batch)
 

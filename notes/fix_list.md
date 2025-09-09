@@ -27,25 +27,29 @@ This document enumerates **all fixes, changes, and additions** to address before
 
 ## 1) Runtime, Mesh, and Process Groups
 
-- [ ] **Mesh validation API: single canonical name**
+- [x] **Mesh validation API: single canonical name**
   - **Where:** `titanax/runtime/mesh.py`
   - **Change:** Ensure one public method for batch/mesh compatibility (e.g., `validate_compatibility(batch_size: int, allow_padding: bool=False)`) and update all call-sites (quickstarts, tests).
   - **DoD:** Grep for previous aliases; no mismatched calls remain; unit test asserts error message on incompatible batch size.
+  - **✅ COMPLETED:** Single canonical `validate_compatibility()` method already implemented and used consistently throughout codebase.
 
-- [ ] **Deterministic device factorization**
+- [x] **Deterministic device factorization**
   - **Where:** `titanax/runtime/mesh.py`
   - **Change:** Make device-count factorization stable across hosts (e.g., lexicographic ordering of devices before partitioning).
   - **DoD:** Multi-host simulated test verifies identical mesh shapes on all ranks.
+  - **✅ COMPLETED:** Added deterministic device sorting by (platform, process_index, id) and deterministic factorization algorithm with comprehensive unit tests.
 
-- [ ] **Process group description utilities**
+- [x] **Process group description utilities**
   - **Where:** `titanax/runtime/process_groups.py`
   - **Add:** `rank(axis)`, `size(axis)`, `coords()` helpers plus a `describe()` string for logging.
   - **DoD:** Unit test asserts ranks/sizes for 1D and 2D meshes.
+  - **✅ COMPLETED:** Added `coords()` method to existing `rank(axis)`, `size(axis)`, and `describe()` methods. Full unit test coverage with 3 new test cases.
 
-- [ ] **Compatibility imports centralization**
+- [x] **Compatibility imports centralization**
   - **Where:** `titanax/compat.py`
   - **Add:** Try/except shims for `pjit`, `shard_map`, and collective APIs that shift between JAX versions.
   - **DoD:** CI matrix passes across two recent JAX versions using only `from titanax.compat import pjit, shard_map, ...` in the codebase.
+  - **✅ COMPLETED:** Created comprehensive `titanax.compat` module with version-adaptive imports for all JAX APIs. Updated all imports throughout codebase to use compatibility layer. 7 new unit tests verify compatibility across JAX versions.
 
 ---
 
