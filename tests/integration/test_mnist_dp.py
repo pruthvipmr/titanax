@@ -141,6 +141,7 @@ def test_mnist_convergence():
 
 
 @pytest.mark.integration
+@pytest.mark.requires_multi_device
 @pytest.mark.skipif(len(jax.devices()) < 2, reason="Requires at least 2 devices")
 def test_multi_device_parity():
     """Test 1-device vs multi-device loss parity (within tolerance)."""

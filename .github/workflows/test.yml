@@ -31,7 +31,12 @@ jobs:
       run: uv run python -m pytest tests/unit/ -v
     
     - name: Run integration tests
-      run: uv run python -m pytest tests/integration/ -v
+      run: |
+        # Skip multi-device tests on CI (requires multiple GPUs/TPUs)
+        uv run python -m pytest tests/integration/ -v -m "not requires_multi_device"
+      env:
+        # Force JAX to use CPU platform for single-device tests
+        JAX_PLATFORM_NAME: cpu
     
     - name: Run type checking
       run: uv run mypy src/titanax/
@@ -59,5 +64,18 @@ jobs:
     - name: Install dependencies
       run: uv sync --all-extras --dev
     
+    - name: Check if benchmarks exist
+      run: |
+        if [ -z "$(find tests/benchmarks -name '*.py' -not -name '__init__.py' 2>/dev/null)" ]; then
+          echo "No benchmark files found, skipping benchmark tests"
+          exit 0
+        fi
+    
     - name: Run benchmarks
-      run: uv run python -m pytest tests/benchmarks/ -v
+      run: |
+        # Only run if benchmark files exist
+        if [ -n "$(find tests/benchmarks -name '*.py' -not -name '__init__.py' 2>/dev/null)" ]; then
+          uv run python -m pytest tests/benchmarks/ -v
+        else
+          echo "No benchmark tests to run"
+        fi
