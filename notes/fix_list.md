@@ -1,4 +1,4 @@
-# Titanax — Phase-1 Fixlist & Additions
+# Titanax — Phase P0 Fixlist & Additions
 _Last updated: 2025-09-09_
 
 
@@ -259,11 +259,11 @@ Keep these explicit to manage expectations.
 
 ## Suggested Milestone Order
 
-1. **Repo hygiene + README + example + import/test smoke**  
-2. **Engine/DP core: microbatching, errors, logging header**  
-3. **Checkpointing + resume**  
-4. **Collectives coverage + tests**  
-5. **TP helpers + minimal TP/PP examples**  
+1. **Repo hygiene + README + example + import/test smoke**
+2. **Engine/DP core: microbatching, errors, logging header**
+3. **Checkpointing + resume**
+4. **Collectives coverage + tests**
+5. **TP helpers + minimal TP/PP examples**
 6. **CI matrix + docs**
 
 ---
