@@ -3,7 +3,7 @@
 __version__ = "0.1.0"
 __version_tuple__ = (0, 1, 0)
 
-# Build metadata 
+# Build metadata
 __build_date__ = "2025-09-06"
 __build_type__ = "development"
 

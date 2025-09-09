@@ -19,17 +19,17 @@ from .types import Logger, CheckpointStrategy
 def simple_data_parallel(
     batch_size: int,
     learning_rate: float = 3e-4,
-    precision: str = "bf16", 
+    precision: str = "bf16",
     checkpoint_dir: Optional[str] = None,
     loggers: Optional[List[Logger]] = None,
-    optimizer = None,
-    devices: Union[str, List[jax.Device], None] = "all"
+    optimizer=None,
+    devices: Union[str, List[jax.Device], None] = "all",
 ) -> Engine:
     """Create a simple data parallel training setup.
-    
+
     This is a convenience function for the most common case: data parallel
     training with sensible defaults.
-    
+
     Args:
         batch_size: Global batch size (must be divisible by number of devices)
         learning_rate: Learning rate for optimizer
@@ -38,10 +38,10 @@ def simple_data_parallel(
         loggers: List of loggers (None for basic stdout logger)
         optimizer: Custom optimizer (None for AdamW)
         devices: Device specification ("all", device list, or None)
-        
+
     Returns:
         Configured Engine ready for training
-        
+
     Example:
         ```python
         engine = tx.quickstart.simple_data_parallel(
@@ -54,14 +54,14 @@ def simple_data_parallel(
     """
     # Initialize distributed if needed
     auto_initialize()
-    
+
     # Create mesh with data parallelism
     mesh = MeshSpec(devices=devices, axes=("data",))
     mesh.validate_compatibility(batch_size)
-    
+
     # Create data parallel plan
     plan = Plan(data_parallel=DP(axis="data"))
-    
+
     # Set up precision
     if precision == "bf16":
         precision_config = _Precision(bfloat16=True)
@@ -70,21 +70,23 @@ def simple_data_parallel(
     elif precision == "fp32":
         precision_config = _Precision()
     else:
-        raise ValueError(f"Invalid precision: {precision}. Use 'fp32', 'bf16', or 'fp16'")
-    
+        raise ValueError(
+            f"Invalid precision: {precision}. Use 'fp32', 'bf16', or 'fp16'"
+        )
+
     # Set up optimizer
     if optimizer is None:
         optimizer = adamw(learning_rate)
-    
+
     # Set up checkpoint
     checkpoint: Optional[CheckpointStrategy] = None
     if checkpoint_dir is not None:
         checkpoint = OrbaxCheckpoint(checkpoint_dir)
-    
+
     # Set up loggers
     if loggers is None:
         loggers = [Basic()]
-    
+
     return Engine(
         mesh=mesh,
         plan=plan,
@@ -103,13 +105,13 @@ def simple_tensor_parallel(
     precision: str = "bf16",
     checkpoint_dir: Optional[str] = None,
     loggers: Optional[List[Logger]] = None,
-    devices: Union[str, List[jax.Device], None] = "all"
+    devices: Union[str, List[jax.Device], None] = "all",
 ) -> Engine:
     """Create a simple tensor parallel training setup.
-    
+
     Note: This is a stub implementation. Full tensor parallel support
     will be available in phase P1.
-    
+
     Args:
         batch_size: Global batch size
         model_parallel_size: Size of model parallel dimension
@@ -119,7 +121,7 @@ def simple_tensor_parallel(
         checkpoint_dir: Directory for checkpoints (None to disable)
         loggers: List of loggers (None for basic stdout logger)
         devices: Device specification
-        
+
     Returns:
         Configured Engine ready for tensor parallel training
     """
@@ -132,10 +134,10 @@ def simple_tensor_parallel(
 
 def validate_setup(engine: Engine) -> dict:
     """Validate an engine setup and return diagnostic information.
-    
+
     Args:
         engine: Engine to validate
-        
+
     Returns:
         Dictionary with validation results and diagnostics
     """
@@ -152,7 +154,7 @@ def validate_setup(engine: Engine) -> dict:
         "optimizer_type": type(engine.optimizer).__name__,
         "has_checkpoint": engine.checkpoint is not None,
         "logger_count": len(engine.loggers),
-        "validation_status": "ok"
+        "validation_status": "ok",
     }
-    
+
     return diagnostics

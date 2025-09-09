@@ -1,7 +1,7 @@
 """Titanax: Explicit-Parallel JAX Training Framework
 
-Titanax is a lightweight JAX training framework that brings Hugging Face Accelerate/TorchTitan 
-ergonomics to JAX with explicit parallelization. Users must declare meshes, sharding rules, 
+Titanax is a lightweight JAX training framework that brings Hugging Face Accelerate/TorchTitan
+ergonomics to JAX with explicit parallelization. Users must declare meshes, sharding rules,
 and collectives - no XLA auto-sharding.
 
 Key Features:
@@ -14,21 +14,21 @@ Key Features:
 Example Usage:
     ```python
     import titanax as tx
-    
+
     # Create mesh and data parallel plan
     mesh = tx.MeshSpec(devices="all", axes=("data",))
     plan = tx.Plan(data_parallel=tx.DP(axis="data"))
-    
+
     # Set up engine with optimizer and precision
     engine = tx.Engine(
-        mesh=mesh, 
+        mesh=mesh,
         plan=plan,
         optimizer=tx.optim.adamw(3e-4),
         precision=tx.Precision(bfloat16=True),
         checkpoint=tx.OrbaxCheckpoint("ckpts/run1"),
         loggers=[tx.loggers.Basic()]
     )
-    
+
     # Define training step
     @tx.step_fn
     def train_step(state, batch):
@@ -39,7 +39,7 @@ Example Usage:
         grads = tx.collectives.psum(grads, axis="data")
         state = state.apply_gradients(grads=grads)
         return state, {"loss": loss}
-    
+
     # Train the model
     engine.fit(train_step, data=train_data, steps=10_000)
     ```
@@ -59,7 +59,7 @@ from .runtime import (
     MeshSpec,
     ProcessGroups,
     detect_distributed_env,
-    is_distributed_env, 
+    is_distributed_env,
     initialize_distributed,
     auto_initialize,
 )
@@ -68,7 +68,7 @@ from .runtime import (
 from .parallel import (
     Plan,
     DP,
-    TP,  # Note: stub implementation 
+    TP,  # Note: stub implementation
     PP,  # Note: stub implementation
 )
 
@@ -125,32 +125,28 @@ from .io import (
 __all__ = [
     # Version info
     "__version__",
-    "__author__", 
+    "__author__",
     "__email__",
     "__description__",
     "__url__",
-    
     # Core runtime
     "MeshSpec",
     "ProcessGroups",
     "detect_distributed_env",
     "is_distributed_env",
-    "initialize_distributed", 
+    "initialize_distributed",
     "auto_initialize",
-    
     # Parallel plans
     "Plan",
     "DP",
     "TP",
     "PP",
-    
     # Execution
     "Engine",
-    "TrainState", 
+    "TrainState",
     "Precision",
     "step_fn",
     "collectives",
-    
     # PRNG utilities
     "update_rngs",
     "split_rng",
@@ -159,50 +155,50 @@ __all__ = [
     "split_per_device_rng",
     "validate_rng_keys",
     "create_host_device_rngs",
-    
     # Type system
     "Array",
-    "PyTree", 
+    "PyTree",
     "Mesh",
     "PartitionSpec",
     "NamedSharding",
     "Logger",
     "CheckpointStrategy",
     "StepFunction",
-    
     # Exceptions
     "TitanaxError",
     "MeshError",
-    "PlanError", 
+    "PlanError",
     "CollectiveError",
     "EngineError",
     "CheckpointError",
-    
     # Namespaces
     "optim",
     "loggers",
     "io",
     "quickstart",
-    
     # Checkpointing shortcuts
     "OrbaxCheckpoint",
     "CheckpointMetadata",
 ]
+
 
 # Convenience functions for common precision configurations
 def bfloat16_precision():
     """BFloat16 mixed precision configuration."""
     return Precision(bfloat16=True)
 
+
 def float16_precision():
     """Float16 mixed precision configuration."""
     return Precision(fp16=True)
+
 
 def float32_precision():
     """Full precision (Float32) configuration."""
     return Precision()
 
+
 # Aliases for backward compatibility
 bf16_precision = bfloat16_precision
-fp16_precision = float16_precision 
+fp16_precision = float16_precision
 fp32_precision = float32_precision

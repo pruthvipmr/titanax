@@ -15,10 +15,9 @@ from .orbax_io import (
 __all__ = [
     # Base checkpoint functionality
     "BaseCheckpointStrategy",
-    "CheckpointMetadata", 
+    "CheckpointMetadata",
     "resolve_checkpoint_step",
     "validate_checkpoint_compatibility",
-    
     # Orbax implementation
     "OrbaxCheckpoint",
     "create_checkpoint_strategy",

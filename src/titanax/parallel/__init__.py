@@ -4,7 +4,7 @@ from .plan import DP, TP, PP, Plan
 
 __all__ = [
     "DP",
-    "TP", 
+    "TP",
     "PP",
     "Plan",
 ]

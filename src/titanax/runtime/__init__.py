@@ -20,7 +20,7 @@ from .process_groups import ProcessGroups
 
 __all__ = [
     "detect_distributed_env",
-    "is_distributed_env", 
+    "is_distributed_env",
     "initialize_distributed",
     "enumerate_devices",
     "get_device_info",

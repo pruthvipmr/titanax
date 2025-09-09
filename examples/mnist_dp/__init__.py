@@ -14,8 +14,8 @@ from .data import create_data_loaders, get_sample_batch
 
 __all__ = [
     "create_model",
-    "cross_entropy_loss", 
+    "cross_entropy_loss",
     "accuracy",
     "create_data_loaders",
-    "get_sample_batch"
+    "get_sample_batch",
 ]
