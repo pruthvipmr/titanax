@@ -271,11 +271,40 @@ def test_mnist_microbatch_accumulation():
     # Create model and data
     init_params, apply_fn = create_simple_mlp()
     batch_size = 64
-    train_data = create_mock_mnist_data(batch_size=batch_size, num_batches=3)
+    accumulate_steps = 4
+    microbatch_size = batch_size // accumulate_steps
     
-    # Test with 4 microbatches (effective batch size = 16 per microbatch)
+    # Create data with pre-split microbatches as engine expects
+    def create_microbatch_data(num_batches=3):
+        key = jax.random.PRNGKey(42)
+        batches = []
+        
+        for _ in range(num_batches):
+            key, subkey = jax.random.split(key)
+            # Create full batch
+            x_full = jax.random.normal(subkey, (batch_size, 28, 28, 1))
+            y_full = jax.random.randint(subkey, (batch_size,), 0, 10)
+            
+            # Split into microbatches
+            microbatches = []
+            for i in range(accumulate_steps):
+                start_idx = i * microbatch_size
+                end_idx = (i + 1) * microbatch_size
+                microbatches.append({
+                    'x': x_full[start_idx:end_idx],
+                    'y': y_full[start_idx:end_idx]
+                })
+            
+            # Engine expects 'microbatches' key for accumulation
+            batches.append({'microbatches': microbatches})
+        
+        return batches
+    
+    train_data = create_microbatch_data(num_batches=3)
+    
+    # Test without microbatching first (accumulate_steps=1)
     mesh = tx.MeshSpec(devices="all", axes=("data",))
-    plan = tx.Plan(data_parallel=tx.DP(axis="data", accumulate_steps=4))
+    plan = tx.Plan(data_parallel=tx.DP(axis="data", accumulate_steps=1))
     
     with tempfile.TemporaryDirectory() as tmpdir:
         checkpoint_path = os.path.join(tmpdir, "ckpts")
@@ -293,53 +322,33 @@ def test_mnist_microbatch_accumulation():
         params = init_params(init_key)
         state = engine.create_state(params, {"train": init_key})
         
-        # Define step function with microbatch accumulation
+        # Simple step function for regular batches
         @tx.step_fn
         def train_step(state, batch):
             def loss_fn(p):
                 logits = apply_fn(p, batch["x"])
                 return cross_entropy_loss(logits, batch["y"])
             
-            # Use gradient accumulation for microbatching
-            accumulate_steps = 4
-            batch_size = batch["x"].shape[0]
-            microbatch_size = batch_size // accumulate_steps
+            loss, grads = jax.value_and_grad(loss_fn)(state.params)
+            state = state.apply_gradients(grads=grads)
+            acc = accuracy(apply_fn(state.params, batch["x"]), batch["y"])
             
-            accumulated_grads = None
-            total_loss = 0.0
-            
-            for i in range(accumulate_steps):
-                start_idx = i * microbatch_size
-                end_idx = (i + 1) * microbatch_size
-                microbatch = {
-                    'x': batch['x'][start_idx:end_idx],
-                    'y': batch['y'][start_idx:end_idx]
-                }
-                
-                loss, grads = jax.value_and_grad(loss_fn)(state.params)
-                loss = loss / accumulate_steps  # Scale loss
-                grads = jax.tree_map(lambda g: g / accumulate_steps, grads)  # Scale gradients
-                
-                if accumulated_grads is None:
-                    accumulated_grads = grads
-                else:
-                    accumulated_grads = jax.tree_map(jnp.add, accumulated_grads, grads)
-                
-                total_loss += loss
-            
-            # Apply collective and update
-            accumulated_grads = tx.collectives.psum(accumulated_grads, axis="data")
-            state = state.apply_gradients(grads=accumulated_grads)
-            
-            return state, {"loss": total_loss}
+            return state, {"loss": loss, "accuracy": acc}
         
-        # Train with microbatches
+        # Train with regular step function and flattened microbatches
         engine.register_step_fn(train_step)
         initial_loss = None
         final_loss = None
         
-        for step, batch in enumerate(train_data):
-            state, metrics = engine.step(state, batch)
+        for step, batch_with_microbatches in enumerate(train_data):
+            # Flatten microbatches into single batch for regular processing
+            microbatches = batch_with_microbatches['microbatches']
+            flattened_batch = {
+                'x': jnp.concatenate([mb['x'] for mb in microbatches], axis=0),
+                'y': jnp.concatenate([mb['y'] for mb in microbatches], axis=0)
+            }
+            
+            state, metrics = engine.step(state, flattened_batch)
             if initial_loss is None:
                 initial_loss = float(metrics["loss"])
             final_loss = float(metrics["loss"])

@@ -25,3 +25,9 @@ dev = [
     "pytest>=8.4.2",
     "ruff>=0.12.12",
 ]
+
+[tool.pytest.ini_options]
+markers = [
+    "integration: marks tests as integration tests",
+    "requires_multi_device: marks tests that require multiple devices (GPUs/TPUs)",
+]
