@@ -1,13 +1,11 @@
 """Unit tests for Titanax checkpoint system."""
 
-import json
 import tempfile
 import shutil
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import Mock, patch
 import pytest
 
-import jax
 import jax.numpy as jnp
 
 from src.titanax.io.checkpoint import (
@@ -334,7 +332,7 @@ class TestOrbaxCheckpoint:
         assert strategy.checkpoint_dir == self.temp_dir
         assert strategy.save_interval_steps == 500
         assert strategy.keep_checkpoints == 5
-        assert strategy.async_save == False
+        assert not strategy.async_save
         assert strategy.checkpointer == mock_checkpointer
         assert strategy._last_saved_step == -1
     

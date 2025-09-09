@@ -2,10 +2,9 @@
 
 import pytest
 import jax
-import jax.numpy as jnp
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from src.titanax.runtime import MeshSpec, ProcessGroups, detect_distributed_env, enumerate_devices
+from src.titanax.runtime import MeshSpec, detect_distributed_env, enumerate_devices
 from src.titanax.exceptions import MeshError
 
 

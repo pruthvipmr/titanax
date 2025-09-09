@@ -3,7 +3,7 @@
 import jax
 import jax.numpy as jnp
 from jax import lax
-from typing import Tuple, Dict, Any
+from typing import Tuple, Any
 
 from src.titanax.types import PyTree, Array
 

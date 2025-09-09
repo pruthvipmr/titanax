@@ -10,10 +10,8 @@ This is an integration test that exercises the complete Titanax stack.
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 import pytest
 import tempfile
-import shutil
 import os
 
 import sys

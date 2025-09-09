@@ -1,9 +1,8 @@
 """MNIST data loading and preprocessing."""
 
 import numpy as np
-import jax
 import jax.numpy as jnp
-from typing import Tuple, Iterator, Dict, Any, Optional
+from typing import Tuple, Iterator, Dict
 import gzip
 import os
 from urllib.request import urlretrieve

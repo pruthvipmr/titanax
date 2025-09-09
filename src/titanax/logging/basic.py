@@ -5,9 +5,9 @@ with step-based formatting.
 """
 
 import sys
-from typing import Dict, Optional, TextIO
+from typing import Optional, TextIO
 
-from .base import BaseLogger, format_metrics_summary
+from .base import BaseLogger
 from ..types import LogValue, LogDict
 
 

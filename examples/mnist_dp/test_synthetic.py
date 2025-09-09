@@ -10,7 +10,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 
 import src.titanax as tx
 

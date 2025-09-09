@@ -5,7 +5,6 @@ Demo showing the fixes for critical issues:
 2. JAX-based microbatch accumulation using lax.scan
 """
 
-import jax
 import jax.numpy as jnp
 import sys
 from pathlib import Path
@@ -14,7 +13,6 @@ from pathlib import Path
 src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
-import titanax as tx
 
 
 def simple_model_apply(params, x):

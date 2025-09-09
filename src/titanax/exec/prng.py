@@ -5,7 +5,7 @@ ensuring each device gets unique but deterministic RNG streams that comply
 with JAX multi-device best practices.
 """
 
-from typing import Dict, Optional, Union, Any
+from typing import Dict, Optional, Union
 import jax
 import jax.numpy as jnp
 from ..types import Array
@@ -175,7 +175,7 @@ def create_host_device_rngs(
     
     # Get host and device info
     host_id = jax.process_index()
-    local_device_count = jax.local_device_count()
+    _ = jax.local_device_count()
     
     # Create host-specific base key
     base_key = jax.random.PRNGKey(base_seed)

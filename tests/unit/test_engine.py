@@ -3,13 +3,11 @@
 import pytest
 import jax
 import jax.numpy as jnp
-import numpy as np
 from unittest.mock import Mock, patch
 
 from src.titanax.exec import Engine, Precision, TrainState, step_fn
 from src.titanax.runtime import MeshSpec
 from src.titanax.parallel import Plan, DP
-from src.titanax.types import Logger, CheckpointStrategy
 from src.titanax.exceptions import EngineError
 
 
@@ -453,7 +451,7 @@ class TestEngine:
         
         data = [{"x": jnp.ones((1, 2))} for _ in range(2)]
         
-        final_state = engine.fit(step, data, state=initial_state)
+        _ = engine.fit(step, data, state=initial_state)
         
         # Check that checkpoints were saved (at step 1000 and final)
         assert len(self.checkpoint.saved_states) >= 1

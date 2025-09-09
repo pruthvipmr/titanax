@@ -6,7 +6,7 @@ including abstract base classes and common utilities.
 
 import time
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from typing import List
 from ..types import Logger, LogValue, LogDict
 
 

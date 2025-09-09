@@ -6,7 +6,7 @@ import pytest
 from unittest.mock import Mock, patch
 
 from src.titanax.exec.engine import Engine, TrainState, Precision
-from src.titanax.optim.optax_adapter import OptaxAdapter, adamw, sgd
+from src.titanax.optim.optax_adapter import adamw, sgd
 from src.titanax.runtime.mesh import MeshSpec
 from src.titanax.parallel.plan import Plan, DP
 from src.titanax.exceptions import EngineError

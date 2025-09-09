@@ -5,11 +5,8 @@ Optax optimizers with Titanax's training system, including support for
 learning rate scheduling and sharded parameters.
 """
 
-import functools
-from typing import Any, Callable, Dict, Optional, Union
+from typing import Any, Callable, Optional, Union
 
-import jax
-import jax.numpy as jnp
 import optax  # type: ignore
 try:
     from optax.typing import GradientTransformation  # type: ignore
@@ -17,7 +14,7 @@ except ImportError:
     # Fallback for older versions
     from optax._src.base import GradientTransformation  # type: ignore
 
-from ..types import PyTree, Array, Params, OptState
+from ..types import PyTree, Params, OptState
 from ..exceptions import OptimizerError
 
 

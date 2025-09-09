@@ -3,8 +3,7 @@
 import pytest
 import jax
 import jax.numpy as jnp
-import numpy as np
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from src.titanax.exec.prng import (
     create_per_device_rngs,

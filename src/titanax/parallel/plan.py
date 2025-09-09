@@ -7,7 +7,7 @@ and pipeline parallel execution plans, along with validation and composition log
 import dataclasses
 from typing import Optional, Dict, Tuple, Union
 
-from ..exceptions import PlanError, plan_validation_error
+from ..exceptions import plan_validation_error
 from ..types import AxisName
 from ..runtime.mesh import MeshSpec
 

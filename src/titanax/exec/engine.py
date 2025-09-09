@@ -5,7 +5,7 @@ for managing training loops with explicit parallelization.
 """
 
 import dataclasses
-from typing import Any, Dict, List, Optional, Union, Iterable, TYPE_CHECKING
+from typing import Dict, List, Optional, Iterable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..optim.optax_adapter import OptaxAdapter

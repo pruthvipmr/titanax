@@ -7,13 +7,13 @@ requirements that aren't covered by existing test files.
 import pytest
 import jax
 import jax.numpy as jnp
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from src.titanax.runtime import MeshSpec, ProcessGroups
 from src.titanax.parallel.plan import DP, Plan
 from src.titanax.exec.collectives import collectives, set_current_mesh
 from src.titanax.exec.engine import Engine, TrainState
-from src.titanax.exceptions import MeshError, PlanError, EngineError
+from src.titanax.exceptions import MeshError, EngineError
 
 
 class TestProcessGroups:
@@ -140,7 +140,7 @@ class TestCollectivesIntegration:
             
             # Should validate axis properly but may still fail due to transformation context
             try:
-                result = collectives.psum(x, "data")
+                _ = collectives.psum(x, "data")
             except Exception as e:
                 # Should fail with JAX transformation error, not axis validation error
                 assert "axis not found in mesh" not in str(e).lower()

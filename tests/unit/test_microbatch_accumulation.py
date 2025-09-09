@@ -3,7 +3,6 @@
 import pytest
 import jax
 import jax.numpy as jnp
-import numpy as np
 from unittest.mock import Mock
 
 from src.titanax.exec import step_fn

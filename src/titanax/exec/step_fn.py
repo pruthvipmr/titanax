@@ -9,7 +9,6 @@ from typing import Any, Callable, Dict, Optional, Union
 
 import jax
 import jax.numpy as jnp
-from jax import lax
 try:
     from jax.experimental import pjit
     from jax.experimental.shard_map import shard_map
@@ -23,7 +22,7 @@ except (ImportError, AttributeError):
         pjit = None  # type: ignore
         from jax.experimental.shard_map import shard_map
 
-from ..types import StepFunction, PyTree, Array, BatchData, LogDict, StepOutput
+from ..types import StepFunction, PyTree, Array, BatchData, StepOutput
 from ..exceptions import EngineError
 
 

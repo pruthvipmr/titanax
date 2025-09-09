@@ -3,9 +3,9 @@
 import pytest
 import jax
 import jax.numpy as jnp
-from unittest.mock import Mock, MagicMock
+from unittest.mock import Mock
 
-from src.titanax.exec import Engine, Precision, TrainState, step_fn
+from src.titanax.exec import Engine, TrainState, step_fn
 from src.titanax.runtime import MeshSpec
 from src.titanax.parallel import Plan, DP
 from src.titanax.exceptions import EngineError
@@ -26,7 +26,7 @@ class FailingLogger:
     def log_dict(self, metrics: dict, step: int) -> None:
         self.call_count += 1
         if self.fail_on in ["both", "dict"]:
-            raise Exception(f"Logging failed for dict")
+            raise Exception("Logging failed for dict")
 
 
 class TestErrorHandling:

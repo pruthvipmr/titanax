@@ -11,11 +11,9 @@ import jax
 import jax.numpy as jnp
 
 import src.titanax as tx
-from src.titanax.types import Array
 
 # Import local modules
 from model import create_model, cross_entropy_loss, accuracy
-from data import get_sample_batch
 
 
 def create_fake_data_loader(batch_size: int, num_batches: int = 10):

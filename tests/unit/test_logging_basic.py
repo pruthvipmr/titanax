@@ -2,13 +2,10 @@
 
 import io
 import sys
-import time
 from unittest.mock import patch
 
-import pytest
 
 from src.titanax.logging.basic import Basic, CompactBasic
-from src.titanax.types import LogDict, LogValue
 
 
 class TestBasic:

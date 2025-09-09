@@ -7,12 +7,10 @@ All collective operations properly handle mesh context and work within
 JAX transformations like pjit and shard_map.
 """
 
-from typing import Any, Optional
-import warnings
+from typing import Optional
 import threading
 
 import jax
-import jax.numpy as jnp
 from jax import lax
 
 from ..types import PyTree, Array, AxisName

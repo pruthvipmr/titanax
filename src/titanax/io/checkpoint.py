@@ -4,13 +4,12 @@ This module defines the checkpoint interface and provides utility functions
 for checkpoint management, path resolution, and metadata handling.
 """
 
-import os
 import re
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from dataclasses import dataclass
 
-from ..types import PyTree, CheckpointStrategy
+from ..types import CheckpointStrategy
 from ..exceptions import CheckpointError
 
 

@@ -9,7 +9,6 @@ import math
 from typing import Optional, Tuple, List, Dict, Any, Union
 
 import numpy as np
-import jax
 import jax.sharding as sharding
 
 from ..exceptions import MeshError, mesh_validation_error
@@ -135,7 +134,7 @@ class MeshSpec:
         if device_count % known_size != 0:
             raise mesh_validation_error(
                 f"Cannot divide {device_count} devices by known shape product {known_size}",
-                f"Ensure shape dimensions are compatible with device count"
+                "Ensure shape dimensions are compatible with device count"
             )
         
         if len(none_indices) == 1:

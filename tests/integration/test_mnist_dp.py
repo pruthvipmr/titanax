@@ -11,10 +11,8 @@ This is a comprehensive integration test that exercises the complete Titanax sta
 
 import jax
 import jax.numpy as jnp
-import numpy as np
 import pytest
 import tempfile
-import shutil
 import os
 
 import sys
@@ -157,7 +155,7 @@ def test_multi_device_parity():
     mesh_single = tx.MeshSpec(devices=[jax.devices()[0]], axes=("data",))
     plan_single = tx.Plan(data_parallel=tx.DP(axis="data"))
     
-    with tempfile.TemporaryDirectory() as tmpdir1:
+    with tempfile.TemporaryDirectory() as _:
         engine1 = tx.Engine(
             mesh=mesh_single,
             plan=plan_single,
@@ -180,7 +178,7 @@ def test_multi_device_parity():
     mesh_multi = tx.MeshSpec(devices="all", axes=("data",))
     plan_multi = tx.Plan(data_parallel=tx.DP(axis="data"))
     
-    with tempfile.TemporaryDirectory() as tmpdir2:
+    with tempfile.TemporaryDirectory() as _:
         engine2 = tx.Engine(
             mesh=mesh_multi,
             plan=plan_multi,
@@ -203,8 +201,8 @@ def test_multi_device_parity():
     
     # Compare losses - they should be close but not exactly equal due to different 
     # batch distribution patterns
-    print(f"Single device losses: {[f'{l:.6f}' for l in single_losses]}")
-    print(f"Multi device losses:  {[f'{l:.6f}' for l in multi_losses]}")
+    print(f"Single device losses: {[f'{loss:.6f}' for loss in single_losses]}")
+    print(f"Multi device losses:  {[f'{loss:.6f}' for loss in multi_losses]}")
     
     # Check that training is happening on both
     assert single_losses[0] > single_losses[-1], "Single device should converge"
@@ -330,7 +328,7 @@ def test_microbatch_equivalence():
     # Test 1: Regular single-step processing
     plan_regular = tx.Plan(data_parallel=tx.DP(axis="data", accumulate_steps=1))
     
-    with tempfile.TemporaryDirectory() as tmpdir1:
+    with tempfile.TemporaryDirectory() as _:
         engine1 = tx.Engine(
             mesh=mesh,
             plan=plan_regular,
@@ -351,7 +349,7 @@ def test_microbatch_equivalence():
     # Test 2: Microbatch processing with manual accumulation
     plan_micro = tx.Plan(data_parallel=tx.DP(axis="data", accumulate_steps=1))  # Still 1, we'll do manual accumulation
     
-    with tempfile.TemporaryDirectory() as tmpdir2:
+    with tempfile.TemporaryDirectory() as _:
         engine2 = tx.Engine(
             mesh=mesh,
             plan=plan_micro,
@@ -377,7 +375,7 @@ def test_microbatch_equivalence():
             for i in range(accumulate_steps):
                 start_idx = i * microbatch_size
                 end_idx = (i + 1) * microbatch_size
-                microbatch = {
+                _ = {
                     'x': batch['x'][start_idx:end_idx],
                     'y': batch['y'][start_idx:end_idx]
                 }

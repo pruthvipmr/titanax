@@ -9,7 +9,7 @@ from typing import Dict
 import jax
 import jax.numpy as jnp
 
-from ..exceptions import MeshError, mesh_validation_error
+from ..exceptions import mesh_validation_error
 from ..types import Mesh, ProcessRank, WorldSize
 
 
@@ -178,7 +178,7 @@ class ProcessGroups:
         """
         lines = ["ProcessGroups:"]
         lines.append(f"  Mesh shape: {dict(self._mesh.shape)}")
-        lines.append(f"  Current process ranks:")
+        lines.append("  Current process ranks:")
         
         for axis_name in self._mesh.axis_names:
             size = self._axis_sizes[axis_name]

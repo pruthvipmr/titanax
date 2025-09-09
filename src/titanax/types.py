@@ -3,9 +3,8 @@
 This module provides type aliases and protocols used throughout the Titanax framework.
 """
 
-from typing import Any, Dict, List, Tuple, Union, Protocol, runtime_checkable
+from typing import Any, Dict, Tuple, Union, Protocol, runtime_checkable
 import jax
-import jax.numpy as jnp
 
 # JAX/PyTree type aliases
 PyTree = Any  # JAX PyTree - nested structure of arrays

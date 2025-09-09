@@ -1,7 +1,6 @@
 """Unit tests for collective operations."""
 
 import pytest
-import warnings
 from functools import partial
 import jax
 import jax.numpy as jnp
@@ -110,7 +109,7 @@ class TestCollectivesBasic:
     def test_tree_validation(self):
         """Test PyTree validation in collective operations."""
         # Valid tree
-        valid_tree = {"w": jnp.array([1.0]), "b": jnp.array([2.0])}
+        _ = {"w": jnp.array([1.0]), "b": jnp.array([2.0])}
         
         # Invalid tree with non-array leaf
         invalid_tree = {"w": jnp.array([1.0]), "b": [1, 2, 3]}
@@ -128,7 +127,7 @@ class TestCollectiveImplementations:
         
         # Should fail with unbound axis error, not return unchanged
         try:
-            result = collectives.all_gather(x, "data")
+            _ = collectives.all_gather(x, "data")
         except Exception as e:
             # Should fail due to no mesh context, but validate it's not a stub
             assert ("unbound axis name" in str(e) or "JAX operation failed" in str(e) or 
@@ -144,7 +143,7 @@ class TestCollectiveImplementations:
         
         # Should fail with unbound axis error, not return unchanged
         try:
-            result = collectives.reduce_scatter(x, "data", op="add")
+            _ = collectives.reduce_scatter(x, "data", op="add")
         except Exception as e:
             # Should fail due to no mesh context, but validate it's not a stub
             assert ("unbound axis name" in str(e) or "JAX operation failed" in str(e) or 
@@ -168,7 +167,7 @@ class TestCollectiveImplementations:
         
         # Should fail with unbound axis error, not return unchanged
         try:
-            result = collectives.broadcast(x, "data", src_index=0)
+            _ = collectives.broadcast(x, "data", src_index=0)
         except Exception as e:
             # Should fail due to no mesh context, but validate it's not a stub
             assert ("unbound axis name" in str(e) or "JAX operation failed" in str(e) or 
@@ -208,7 +207,7 @@ class TestCollectiveImplementations:
         
         # Should fail with unbound axis error when valid
         try:
-            result = collectives.ppermute(x, "data", perm=[(0, 1), (1, 0)])
+            _ = collectives.ppermute(x, "data", perm=[(0, 1), (1, 0)])
         except Exception as e:
             # Should fail due to no mesh context, but validate it's not a stub
             assert ("unbound axis name" in str(e) or "JAX operation failed" in str(e) or 

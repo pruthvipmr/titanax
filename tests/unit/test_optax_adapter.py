@@ -1,6 +1,5 @@
 """Unit tests for Optax optimizer adapters."""
 
-import jax
 import jax.numpy as jnp
 import optax
 import pytest
@@ -33,7 +32,8 @@ class TestOptaxAdapter:
     def test_init_with_schedule(self):
         """Test OptaxAdapter with learning rate schedule."""
         base_opt = optax.sgd(learning_rate=1.0)
-        schedule = lambda step: 1e-3 * (0.9 ** (step // 100))
+        def schedule(step):
+            return 1e-3 * (0.9 ** (step // 100))
         
         adapter = OptaxAdapter(base_opt, learning_rate=schedule, name="custom")
         
@@ -88,7 +88,8 @@ class TestOptaxAdapter:
     
     def test_apply_gradients_with_schedule(self):
         """Test gradient application with learning rate schedule."""
-        schedule = lambda step: 1.0 if step < 10 else 0.1
+        def schedule(step):
+            return 1.0 if step < 10 else 0.1
         # Create optimizer with the schedule directly
         base_opt = optax.sgd(learning_rate=schedule)
         adapter = OptaxAdapter(base_opt, learning_rate=schedule)
@@ -136,7 +137,8 @@ class TestOptaxAdapter:
     
     def test_get_learning_rate_schedule(self):
         """Test learning rate retrieval with schedule."""
-        schedule = lambda step: 1e-3 * (0.9 ** step)
+        def schedule(step):
+            return 1e-3 * (0.9 ** step)
         adapter = OptaxAdapter(None, learning_rate=schedule)
         
         assert adapter.get_learning_rate(0) == 1e-3
@@ -153,7 +155,8 @@ class TestOptaxAdapter:
     
     def test_describe_scheduled_lr(self):
         """Test description with scheduled learning rate."""
-        schedule = lambda step: 1e-3
+        def schedule(step):
+            return 1e-3
         adapter = OptaxAdapter(None, learning_rate=schedule, name="test_opt")
         description = adapter.describe()
         

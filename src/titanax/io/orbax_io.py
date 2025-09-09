@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 import jax
-import orbax.checkpoint as ocp  # type: ignore
 from orbax.checkpoint import PyTreeCheckpointer  # type: ignore
 
 from ..types import PyTree
