@@ -10,16 +10,16 @@ This document enumerates **all fixes, changes, and additions** to address before
 
 ## 0) Repo hygiene & quick wins
 
-- [ ] **Add a 10‑line runnable example (CPU-only)**
+- [x] **Add a 10‑line runnable example (CPU-only)**
   - **Where:** `examples/minimal_dp.py`
   - **Why:** Proves import surface, engine wiring, and logging.
-  - **DoD:** `python examples/minimal_dp.py` runs in <30s on CPU, prints one metric line and exits 0.
+  - **DoD:** `uv run python examples/minimal_dp.py` runs in <30s on CPU, prints one metric line and exits 0.
 
-- [ ] **Smoke test for imports**
+- [x] **Smoke test for imports**
   - **Where:** `tests/test_imports.py`
   - **DoD:** `import titanax as tx` plus the documented public symbols (mesh/plan/engine/optim/loggers/io) all import without error.
 
-- [ ] **Project README refresh**
+- [x] **Project README refresh**
   - **Where:** `README.md`
   - **DoD:** Include: (a) 10‑line example, (b) quickstart snippet for DP, (c) a roadmap table (DP ✅, TP 🚧, PP 🚧), (d) note on explicit meshes & collectives.
 

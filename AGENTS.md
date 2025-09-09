@@ -32,6 +32,7 @@ uv run black src/ tests/ examples/
 uv run ruff check src/ tests/ examples/
 
 # Run examples
+uv run python examples/minimal_dp.py                                      # 10-line CPU-only example
 uv run python examples/mnist_dp/train.py --steps=100 --eval-every=25
 uv run python examples/mnist_dp/train.py --model=cnn --steps=50 --batch-size=128
 uv run python examples/mnist_dp/download_mnist.py
