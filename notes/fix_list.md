@@ -242,18 +242,6 @@ This document enumerates **all fixes, changes, and additions** to address before
 
 ---
 
-## 13) Docs (API & Design)
-
-- [ ] **API reference stubs**
-  - **Where:** `docs/` (or docstrings + mkdocs/sphinx)
-  - **DoD:** Public classes/functions have docstrings; `mkdocs serve` (or sphinx) builds API pages.
-
-- [ ] **Design notes**
-  - **Where:** `notes/` or `docs/design/`
-  - **DoD:** Short docs for: (a) mesh/plan philosophy (explicit > implicit), (b) pjit vs shard_map tradeoffs, (c) RNG model, (d) how to extend TP/PP.
-
----
-
 ## 14) Non-Goals (for now)
 
 - Full-featured pipeline parallel schedulers beyond 1F1B
