@@ -5,11 +5,14 @@ and pipeline parallel execution plans, along with validation and composition log
 """
 
 import dataclasses
-from typing import Optional, Dict, Tuple, Union
+from typing import Optional, Dict, Tuple, Union, List, TYPE_CHECKING
 
 from ..exceptions import plan_validation_error
 from ..types import AxisName
 from ..runtime.mesh import MeshSpec
+
+if TYPE_CHECKING:
+    from .pp import Stage
 
 
 @dataclasses.dataclass(frozen=True)
@@ -181,7 +184,7 @@ class PP:
     """
 
     axis: AxisName
-    stages: list  # Will be defined later as List[Stage]
+    stages: List["Stage"]
     microbatch_size: int
     checkpoint_ratio: float = 0.0
 

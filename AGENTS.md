@@ -39,6 +39,11 @@ uv run python examples/mnist_dp/download_mnist.py
 uv run python examples/mnist_dp/test_synthetic.py
 uv run python examples/gpt_small_tp/train.py
 
+# Test specific new components (Section 2 additions)
+uv run python -c "import titanax as tx; print('TP helpers available:', hasattr(tx, 'tp_helpers'))"
+uv run python -c "import titanax as tx; print('PP Stage available:', hasattr(tx, 'Stage'))"
+uv run python -c "from titanax.tp_helpers import mlp_rules; print('MLP rules:', mlp_rules('test', 'model'))"
+
 # Validate package structure and syntax (works without dependencies)
 tools/quick_validation.py
 ```
@@ -90,7 +95,10 @@ src/titanax/
 ├── exceptions.py    # Exception hierarchy with suggestions  
 ├── compat.py        # JAX version compatibility layer - IMPLEMENTED
 ├── runtime/         # Mesh, distributed init
-├── parallel/        # Plans (DP/TP/PP), sharding rules
+├── parallel/        # Plans (DP/TP/PP), sharding rules, TP helpers - ENHANCED
+│   ├── plan.py      # DP/TP/PP plan definitions with validation - ENHANCED
+│   ├── tp_helpers.py # Tensor parallel rule helpers for common patterns - NEW
+│   └── pp.py        # Pipeline parallel Stage and PipelineSchedule - NEW
 ├── exec/            # Engine, collectives, step functions
 ├── optim/           # Optax adapters
 ├── io/              # Checkpointing (checkpoint.py, orbax_io.py) - IMPLEMENTED
@@ -100,6 +108,9 @@ src/titanax/
 
 tests/
 ├── unit/            # Component validation
+│   ├── test_plan.py      # Enhanced with all parallelism combinations
+│   ├── test_tp_helpers.py # Golden spec validation tests - NEW 
+│   └── test_pp.py        # Stage and schedule validation tests - NEW
 ├── integration/     # End-to-end workflows
 └── benchmarks/      # Performance validation
 

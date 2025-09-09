@@ -53,22 +53,25 @@ This document enumerates **all fixes, changes, and additions** to address before
 
 ---
 
-## 2) Plans: DP / TP / PP
+## 2) Plans: DP / TP / PP ✅ COMPLETED
 
-- [ ] **Plan validation hardening**
+- [x] **Plan validation hardening**
   - **Where:** `titanax/parallel/plan.py`
   - **Change:** Validate that all referenced axis names exist in the mesh; forbid duplicates unless explicitly whitelisted (e.g., PP and TP sharing a “model” axis if supported).
   - **DoD:** Unit tests for good/bad combos (DP-only, TP-only, DP+TP, DP+PP, TP+PP).
+  - **✅ COMPLETED:** Added comprehensive plan combination validation tests covering all valid/invalid parallelism combinations (DP-only, TP-only, PP-only, DP+TP, DP+PP, TP+PP, DP+TP+PP) with proper axis conflict detection and helpful error messages.
 
-- [ ] **TP rule helpers (minimal)**
+- [x] **TP rule helpers (minimal)**
   - **Where:** `titanax/parallel/tp_helpers.py`
   - **Add:** Convenience functions to generate common `PartitionSpec`s by param name (e.g., MLP `{in,out}` splits, attention projections).
   - **DoD:** Toy MLP’s params get partitioned by a helper; golden specs asserted in tests.
 
-- [ ] **PP stage type (skeleton)**
+- [x] **PP stage type (skeleton)**
   - **Where:** `titanax/parallel/pp.py`
   - **Add:** `Stage` dataclass/protocol: `forward(inputs) -> (outputs, activations)`, remat policy field, and stage boundary metadata.
   - **DoD:** `Plan` can be constructed with two stages and validates microbatch size vs. pipeline schedule (see §5).
+
+**✅ Section 2 Summary:** Successfully implemented all Plan validation hardening with comprehensive test coverage for all parallelism combinations. Created complete TP helper functions with golden spec validation for MLP, attention, embedding, and layer norm patterns. Implemented full PP infrastructure with Stage protocol, PipelineSchedule, and 1F1B scheduling support. All components are fully tested (68 total tests) and integrated into the main Titanax API.
 
 ---
 

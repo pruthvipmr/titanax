@@ -70,6 +70,12 @@ from .parallel import (
     DP,
     TP,  # Note: stub implementation
     PP,  # Note: stub implementation
+    Stage,
+    StageProtocol,
+    PipelineSchedule,
+    create_simple_stage,
+    create_1f1b_schedule,
+    tp_helpers,
 )
 
 # Compatibility layer
@@ -144,6 +150,12 @@ __all__ = [
     "DP",
     "TP",
     "PP",
+    "Stage",
+    "StageProtocol", 
+    "PipelineSchedule",
+    "create_simple_stage",
+    "create_1f1b_schedule",
+    "tp_helpers",
     # Execution
     "Engine",
     "TrainState",

@@ -234,3 +234,72 @@ class TestPlan:
         dp_micro = DP(axis="data", accumulate_steps=4)
         plan_micro = Plan(data_parallel=dp_micro)
         assert plan_micro.has_microbatching()
+
+    def test_plan_combinations_validation(self):
+        """Test validation for all good/bad parallelism combinations."""
+        # Good combinations
+        dp = DP(axis="data")
+        tp = TP(axis="model", rules={"param": ("model", None)})
+        pp = PP(axis="pipe", stages=[], microbatch_size=4)
+
+        # DP-only (already tested above, but explicit here)
+        plan_dp = Plan(data_parallel=dp)
+        mesh_dp = MeshSpec(axes=("data",))
+        plan_dp.validate(mesh_dp)  # Should pass
+
+        # TP-only
+        plan_tp = Plan(tensor_parallel=tp)
+        mesh_tp = MeshSpec(axes=("model",))
+        plan_tp.validate(mesh_tp)  # Should pass
+
+        # PP-only
+        plan_pp = Plan(pipeline_parallel=pp)
+        mesh_pp = MeshSpec(axes=("pipe",))
+        plan_pp.validate(mesh_pp)  # Should pass
+
+        # DP+TP
+        plan_dp_tp = Plan(data_parallel=dp, tensor_parallel=tp)
+        mesh_dp_tp = MeshSpec(axes=("data", "model"))
+        plan_dp_tp.validate(mesh_dp_tp)  # Should pass
+
+        # DP+PP
+        plan_dp_pp = Plan(data_parallel=dp, pipeline_parallel=pp)
+        mesh_dp_pp = MeshSpec(axes=("data", "pipe"))
+        plan_dp_pp.validate(mesh_dp_pp)  # Should pass
+
+        # TP+PP (sharing model axis is allowed)
+        pp_model = PP(axis="model", stages=[], microbatch_size=4)
+        plan_tp_pp = Plan(tensor_parallel=tp, pipeline_parallel=pp_model)
+        mesh_tp_pp = MeshSpec(axes=("model",))
+        plan_tp_pp.validate(mesh_tp_pp)  # Should pass
+
+        # DP+TP+PP
+        plan_all = Plan(data_parallel=dp, tensor_parallel=tp, pipeline_parallel=pp)
+        mesh_all = MeshSpec(axes=("data", "model", "pipe"))
+        plan_all.validate(mesh_all)  # Should pass
+
+    def test_plan_combinations_invalid(self):
+        """Test invalid parallelism combinations."""
+        dp = DP(axis="data")
+        tp = TP(axis="model", rules={"param": ("model", None)})
+
+        # Axis conflicts (DP and TP using same axis)
+        tp_data_axis = TP(axis="data", rules={"param": ("data", None)})
+        with pytest.raises(PlanError, match="Axis 'data' is used by multiple"):
+            Plan(data_parallel=dp, tensor_parallel=tp_data_axis)
+
+        # PP using DP axis (not allowed unless sharing with TP)
+        pp_data_axis = PP(axis="data", stages=[], microbatch_size=4)
+        with pytest.raises(PlanError, match="Axis 'data' is used by multiple"):
+            Plan(data_parallel=dp, pipeline_parallel=pp_data_axis)
+
+        # Missing axes in mesh
+        plan_valid = Plan(data_parallel=dp, tensor_parallel=tp)
+        mesh_missing = MeshSpec(axes=("data",))  # Missing "model" axis
+        with pytest.raises(PlanError, match="TP axis 'model' not found"):
+            plan_valid.validate(mesh_missing)
+
+        # Missing multiple axes - use a mesh that exists but doesn't have all required axes
+        mesh_partial = MeshSpec(axes=("other",))  # Has axes but not the ones we need
+        with pytest.raises(PlanError, match="DP axis 'data' not found"):
+            plan_valid.validate(mesh_partial)
