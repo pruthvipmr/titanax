@@ -61,7 +61,7 @@ class BaseCheckpointStrategy:
         Returns:
             Sorted list of available checkpoint step numbers
         """
-        steps = []
+        steps: list[int] = []
         if not self.checkpoint_dir.exists():
             return steps
             

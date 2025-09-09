@@ -159,8 +159,8 @@ def get_device_info() -> Dict[str, Any]:
     global_devices = jax.devices()
     
     # Count devices by type
-    local_by_type = {}
-    global_by_type = {}
+    local_by_type: dict[str, int] = {}
+    global_by_type: dict[str, int] = {}
     
     for device in local_devices:
         device_type = device.platform.lower()

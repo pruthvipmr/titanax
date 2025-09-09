@@ -10,12 +10,12 @@ from typing import Any, Callable, Dict, Optional, Union
 
 import jax
 import jax.numpy as jnp
-import optax
+import optax  # type: ignore
 try:
-    from optax.typing import GradientTransformation
+    from optax.typing import GradientTransformation  # type: ignore
 except ImportError:
     # Fallback for older versions
-    from optax._src.base import GradientTransformation
+    from optax._src.base import GradientTransformation  # type: ignore
 
 from ..types import PyTree, Array, Params, OptState
 from ..exceptions import OptimizerError
@@ -119,9 +119,9 @@ class OptaxAdapter:
             Optax's internal transformations.
         """
         if self._lr_is_callable:
-            return float(self.learning_rate(step))
+            return self.learning_rate(step)  # type: ignore
         else:
-            return float(self.learning_rate)
+            return self.learning_rate  # type: ignore
     
     def describe(self) -> str:
         """Return a human-readable description of the optimizer."""

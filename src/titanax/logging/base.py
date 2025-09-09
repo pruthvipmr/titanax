@@ -166,10 +166,10 @@ def aggregate_metrics(metrics_list: List[LogDict]) -> LogDict:
     if not metrics_list:
         return {}
     
-    aggregated = {}
+    aggregated: LogDict = {}
     
     # Get all unique keys
-    all_keys = set()
+    all_keys: set[str] = set()
     for metrics in metrics_list:
         all_keys.update(metrics.keys())
     
@@ -182,7 +182,8 @@ def aggregate_metrics(metrics_list: List[LogDict]) -> LogDict:
             
         # For numeric values, compute mean
         if isinstance(values[0], (int, float)):
-            aggregated[key] = sum(values) / len(values)
+            numeric_values = [v for v in values if isinstance(v, (int, float))]
+            aggregated[key] = sum(numeric_values) / len(numeric_values)
         else:
             # For non-numeric, use the last value
             aggregated[key] = values[-1]

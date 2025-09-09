@@ -404,7 +404,7 @@ def create_gradient_accumulation_step_fn(
     """
     if accumulate_steps == 1:
         # No accumulation needed - return standard step function
-        @step_fn()
+        @step_fn()  # type: ignore
         def simple_step(state, batch):
             def compute_loss(params):
                 return loss_fn(params, batch)
@@ -413,7 +413,7 @@ def create_gradient_accumulation_step_fn(
             new_state = state.apply_gradients(grads=grads)
             return new_state, {"loss": loss}
         
-        return simple_step
+        return simple_step  # type: ignore
     
     # Create accumulating step function
     def grad_fn(params, batch):
@@ -426,7 +426,7 @@ def create_gradient_accumulation_step_fn(
         """Apply accumulated gradients to state."""
         return state.apply_gradients(grads=grads)
     
-    @step_fn()
+    @step_fn()  # type: ignore
     def accumulating_step(state, batch):
         """Step function that accumulates gradients across microbatches."""
         # For now, we need the batches to be provided as a list in batch['microbatches']
@@ -446,7 +446,7 @@ def create_gradient_accumulation_step_fn(
         
         return gradient_accumulation_step(grad_fn, apply_fn, state, microbatches, accumulate_steps)
     
-    return accumulating_step
+    return accumulating_step  # type: ignore
 
 
 def is_step_fn(func: Any) -> bool:

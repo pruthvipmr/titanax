@@ -57,7 +57,7 @@ def simple_data_parallel(
     
     # Create mesh with data parallelism
     mesh = MeshSpec(devices=devices, axes=("data",))
-    mesh.validate_batch_compatibility(batch_size)
+    mesh.validate_compatibility(batch_size)
     
     # Create data parallel plan
     plan = Plan(data_parallel=DP(axis="data"))
@@ -140,9 +140,9 @@ def validate_setup(engine: Engine) -> dict:
         Dictionary with validation results and diagnostics
     """
     diagnostics = {
-        "mesh_info": engine.mesh.describe(),
+        "mesh_info": engine._mesh.devices,
         "plan_info": engine.plan.describe(),
-        "device_count": len(engine.mesh.build().devices),
+        "device_count": len(engine._mesh.devices),
         "precision_config": {
             "bfloat16": engine.precision.bfloat16,
             "fp16": engine.precision.fp16,

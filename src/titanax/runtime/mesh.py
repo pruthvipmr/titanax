@@ -128,7 +128,7 @@ class MeshSpec:
                     f"Shape product {known_size} doesn't match device count {device_count}",
                     f"Adjust shape {self.shape} to multiply to {device_count}"
                 )
-            return tuple(shape_list)
+            return tuple(s for s in shape_list if s is not None)
         
         # Infer missing dimensions
         remaining_devices = device_count // known_size
@@ -147,7 +147,7 @@ class MeshSpec:
             for i, factor in enumerate(factors):
                 shape_list[none_indices[i]] = factor
         
-        return tuple(shape_list)
+        return tuple(s for s in shape_list if s is not None)
     
     def _factorize_device_count(self, device_count: int, num_factors: Optional[int] = None) -> Tuple[int, ...]:
         """Factorize device count into balanced dimensions."""
