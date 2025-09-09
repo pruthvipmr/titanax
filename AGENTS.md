@@ -42,6 +42,22 @@ uv run python examples/gpt_small_tp/train.py
 tools/quick_validation.py
 ```
 
+## Pre-commit Checks
+**ALWAYS run these commands before creating any commit:**
+```bash
+# 1. Type checking - must pass
+uv run mypy src/titanax/
+
+# 2. Code formatting - auto-fix
+uv run black src/ tests/ examples/
+
+# 3. Linting - must pass  
+uv run ruff check src/ tests/ examples/
+
+# 4. All tests - must pass
+uv run python -m pytest tests/ -v --tb=short
+```
+
 ## Code Style Guidelines
 - **Type annotations**: Heavy type annotation on all public APIs
 - **Data structures**: Prefer `dataclasses` over `pydantic` for simplicity
