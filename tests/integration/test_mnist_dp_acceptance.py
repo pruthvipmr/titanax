@@ -63,6 +63,11 @@ def cross_entropy_loss(logits, labels):
     return -jnp.mean(jnp.sum(one_hot_labels * jax.nn.log_softmax(logits), axis=-1))
 
 
+def accuracy(logits, labels):
+    """Classification accuracy."""
+    return jnp.mean(jnp.argmax(logits, axis=-1) == labels)
+
+
 @pytest.mark.integration
 def test_mnist_dp_single_device():
     """Test MNIST training on single device as baseline."""
