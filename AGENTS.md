@@ -9,6 +9,11 @@ Titanax is a lightweight JAX training framework that brings Hugging Face Acceler
 # Install in development mode
 uv pip install -e .
 
+# Fix broken virtual environment (if ModuleNotFoundError occurs)
+rm -rf .venv
+uv venv --python=3.13
+uv sync
+
 # Run all tests
 uv run python -m pytest tests/
 
