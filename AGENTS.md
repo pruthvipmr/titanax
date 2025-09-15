@@ -30,6 +30,11 @@ uv run python examples/mnist_dp/train.py --steps=100 --eval-every=25
 uv run python examples/gpt_small_tp/train.py
 ```
 
+## Feature Workflow
+- Create a dedicated git worktree for each feature before making changes, e.g. `git worktree add ../titanax-myfeature myfeature-branch`.
+- Perform all feature development (code edits, tests, commits) from within that feature-specific worktree.
+- After the feature is merged, remove the worktree with `git worktree remove ../titanax-myfeature` and delete the branch if no longer needed.
+
 ## Pre-commit Checks
 **ALWAYS run these before committing:**
 ```bash
