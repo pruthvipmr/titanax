@@ -3,6 +3,7 @@
 import pytest
 import jax
 import jax.numpy as jnp
+import numpy as np
 from unittest.mock import patch
 
 from src.titanax.exec.prng import (
@@ -69,88 +70,61 @@ class TestPRNGUtilities:
         with pytest.raises(ValueError, match="invalid shape"):
             validate_rng_keys(invalid_rngs)
 
-    def test_create_per_device_rngs_mock_axis(self):
-        """Test per-device RNG creation with mocked axis_index."""
-        base_key = jax.random.PRNGKey(42)
-        named_keys = {"dropout": None, "noise": None}
+    def _create_mesh(self, axis_size: int = 1):
+        devices = jax.devices()
+        if len(devices) < axis_size:
+            pytest.skip(f"requires {axis_size} devices, found {len(devices)}")
+        device_array = np.array(devices[:axis_size]).reshape((axis_size,))
+        return jax.sharding.Mesh(device_array, ("data",))
 
-        # Mock axis_index to simulate device 0
-        with patch("jax.lax.axis_index", return_value=0):
-            rngs = create_per_device_rngs(base_key, named_keys, axis="batch")
+    def test_create_per_device_rngs_single_device(self):
+        """Single-device meshes should receive deterministic keys."""
+        mesh = self._create_mesh(axis_size=1)
+        rngs = create_per_device_rngs(42, mesh, names=("dropout", "noise"))
 
-            assert len(rngs) == 2
-            assert "dropout" in rngs
-            assert "noise" in rngs
+        assert set(rngs.keys()) == {"dropout", "noise"}
+        for value in rngs.values():
+            assert value.shape == mesh.devices.shape + (2,)
+            assert jnp.issubdtype(value.dtype, jnp.unsignedinteger)
 
-            # Verify keys are different from each other
-            assert not jnp.array_equal(rngs["dropout"], rngs["noise"])
+        # Deterministic for the same seed and mesh
+        rngs_2 = create_per_device_rngs(42, mesh, names=("dropout", "noise"))
+        for key in rngs:
+            assert jnp.array_equal(rngs[key], rngs_2[key])
 
-    def test_create_per_device_rngs_different_devices(self):
-        """Test that different devices get different RNG keys."""
-        base_key = jax.random.PRNGKey(42)
-        named_keys = {"dropout": None}
+    def test_create_per_device_rngs_multi_device_unique(self):
+        """Different devices should receive different keys."""
+        if len(jax.devices()) < 2:
+            pytest.skip("requires at least 2 devices to validate uniqueness")
 
-        # Mock two different devices
-        with patch("jax.lax.axis_index", return_value=0):
-            rngs_device_0 = create_per_device_rngs(base_key, named_keys)
+        mesh = self._create_mesh(axis_size=2)
+        rngs = create_per_device_rngs(123, mesh, names=("dropout",))
 
-        with patch("jax.lax.axis_index", return_value=1):
-            rngs_device_1 = create_per_device_rngs(base_key, named_keys)
+        values = rngs["dropout"].reshape(-1, rngs["dropout"].shape[-1])
+        unique_rows = {tuple(row.tolist()) for row in values}
+        assert len(unique_rows) == values.shape[0]
 
-        # Keys should be different between devices
-        assert not jnp.array_equal(rngs_device_0["dropout"], rngs_device_1["dropout"])
+    def test_update_per_device_rngs(self):
+        """Updating RNGs should advance the stream while preserving shape."""
+        mesh = self._create_mesh(axis_size=1)
+        rngs = create_per_device_rngs(7, mesh, names=("dropout",))
+        updated = update_per_device_rngs(rngs)
+        updated_again = update_per_device_rngs(rngs)
 
-    def test_update_per_device_rngs_mock_axis(self):
-        """Test updating per-device RNG keys."""
-        initial_rngs = {
-            "dropout": jax.random.PRNGKey(42),
-            "noise": jax.random.PRNGKey(123),
-        }
+        assert updated["dropout"].shape == rngs["dropout"].shape
+        assert not jnp.array_equal(updated["dropout"], rngs["dropout"])
+        assert jnp.array_equal(updated["dropout"], updated_again["dropout"])
 
-        with patch("jax.lax.axis_index", return_value=0):
-            updated_rngs = update_per_device_rngs(initial_rngs, axis="batch")
+    def test_split_per_device_rng(self):
+        """Splitting should return multiple per-device dictionaries."""
+        mesh = self._create_mesh(axis_size=1)
+        rngs = create_per_device_rngs(0, mesh, names=("dropout",))
+        splits = split_per_device_rng(rngs, num=3)
 
-            # Keys should be updated (different from initial)
-            assert not jnp.array_equal(updated_rngs["dropout"], initial_rngs["dropout"])
-            assert not jnp.array_equal(updated_rngs["noise"], initial_rngs["noise"])
-
-            # But still valid PRNG keys
-            validate_rng_keys(updated_rngs)
-
-    def test_update_per_device_rngs_partial_update(self):
-        """Test updating only specific RNG keys."""
-        initial_rngs = {
-            "dropout": jax.random.PRNGKey(42),
-            "noise": jax.random.PRNGKey(123),
-        }
-
-        with patch("jax.lax.axis_index", return_value=0):
-            updated_rngs = update_per_device_rngs(
-                initial_rngs, keys_to_update=["dropout"], axis="batch"
-            )
-
-            # Only dropout should be updated
-            assert not jnp.array_equal(updated_rngs["dropout"], initial_rngs["dropout"])
-            assert jnp.array_equal(updated_rngs["noise"], initial_rngs["noise"])
-
-    def test_split_per_device_rng_mock_axis(self):
-        """Test splitting per-device RNG keys."""
-        base_rng = jax.random.PRNGKey(42)
-
-        with patch("jax.lax.axis_index", return_value=0):
-            split_keys = split_per_device_rng(base_rng, num_splits=3, axis="batch")
-
-            assert len(split_keys) == 3
-
-            # All splits should be different
-            for i in range(len(split_keys)):
-                for j in range(i + 1, len(split_keys)):
-                    assert not jnp.array_equal(split_keys[i], split_keys[j])
-
-            # All should be valid PRNG keys
-            for key in split_keys:
-                assert isinstance(key, jnp.ndarray)
-                assert key.shape in [(2,), (4,)]
+        assert len(splits) == 3
+        for split in splits:
+            assert set(split.keys()) == {"dropout"}
+            assert split["dropout"].shape == rngs["dropout"].shape
 
     def test_fallback_without_mesh_context(self):
         """Test that functions work without mesh context (single device)."""

@@ -29,7 +29,8 @@ from ..runtime.mesh import MeshSpec
 from ..parallel.plan import Plan
 from ..exceptions import EngineError
 from .collectives import set_current_mesh
-from .step_fn import update_rngs, compile_step_fn_with_mesh
+from .step_fn import update_rngs
+from .compile import compile_step_with_plan
 from .prng import create_host_device_rngs, validate_rng_keys
 
 
@@ -267,15 +268,18 @@ class Engine:
         compile_params = getattr(step_fn, "_compile_params", {})
         donate_argnums = compile_params.get("donate_argnums", (0,))
         static_argnums = compile_params.get("static_argnums", ())
-        device = compile_params.get("device", None)
+        in_shardings = compile_params.get("in_shardings")
+        out_shardings = compile_params.get("out_shardings")
 
         # Compile with proper mesh context for collectives
-        self._compiled_step_fn = compile_step_fn_with_mesh(
+        self._compiled_step_fn = compile_step_with_plan(
             step_fn,
+            self.plan,
             self._mesh,
+            in_shardings=in_shardings,
+            out_shardings=out_shardings,
             donate_argnums=donate_argnums,
             static_argnums=static_argnums,
-            device=device,
         )
 
     def create_state(

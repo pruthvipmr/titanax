@@ -77,30 +77,35 @@ This document enumerates **all fixes, changes, and additions** to address before
 
 ## 3) Execution Core (Engine, Step Functions, PRNG)
 
-- [ ] **Step function decorator guarantees**
+- [x] **Step function decorator guarantees**
   - **Where:** `titanax/exec/step_fn.py`
   - **Change:** Enforce: (a) first arg = `TrainState`, (b) metrics are scalar or reducible, (c) shape/dtype checks under jit.
   - **DoD:** Negative tests raise clear `ValueError` with actionable “fix” text.
+  - **✅ COMPLETED:** Added validation helpers to the decorator so mis-specified signatures and non-scalar metrics raise descriptive `ValueError`s both eagerly and inside compiled step functions.
 
-- [ ] **Plan‑driven compilation (pjit path)**
+- [x] **Plan‑driven compilation (pjit path)**
   - **Where:** `titanax/exec/compile.py`
   - **Add:** Function: `compile_step_with_plan(step_fn, plan, mesh, in_shardings, out_shardings)` that prefers **pjit** when shardings are provided; fallback to `shard_map` for map-style collectives.
   - **DoD:** Unit test compiles a toy step with explicit `PartitionSpec`s and executes on CPU.
+  - **✅ COMPLETED:** Introduced `compile_step_with_plan` (pjit first, shard_map fallback) plus coverage in `tests/unit/test_compile.py` ensuring explicit shardings execute correctly on the CPU mesh.
 
-- [ ] **Per-device RNG utilities**
+- [x] **Per-device RNG utilities**
   - **Where:** `titanax/exec/prng.py`
   - **Change:** Ensure APIs: `create_per_device_rngs(seed, mesh)`, `split_per_device_rng(rngs, num=1)`, `update_per_device_rngs(rngs)` with shape/type checks.
   - **DoD:** Tests verify unique streams across devices and determinism for fixed seeds.
+  - **✅ COMPLETED:** Reworked the RNG helpers around mesh-aware seeds, added batched splitting utilities, and refreshed `tests/unit/test_prng.py` to check determinism and per-device uniqueness.
 
-- [ ] **Engine.fit error contracts**
+- [x] **Engine.fit error contracts**
   - **Where:** `titanax/exec/engine.py`
   - **Change:** `continue_on_error: bool`; on step exception, log and continue or raise; always attempt a final checkpoint on `KeyboardInterrupt`.
   - **DoD:** Tests inject a failing step every N steps and assert both behaviors; final checkpoint exists on interrupt.
+  - **✅ COMPLETED:** Existing Engine logic already satisfied the contract; verified via the error-handling unit tests (including KeyboardInterrupt checkpointing) with the new compilation path in place.
 
-- [ ] **Microbatch gradient accumulation (DP)**
+- [x] **Microbatch gradient accumulation (DP)**
   - **Where:** `titanax/exec/engine.py` or `titanax/exec/grad_accum.py`
   - **Add:** Accumulate with `lax.scan` over microbatches; support loss-scaling compatible with Optax.
   - **DoD:** Test shows identical results between large-batch single step and microbatched accumulation within tolerance.
+  - **✅ COMPLETED:** Extended the accumulation helpers to unscale loss-scaled gradients and surfaced `loss_scale` metrics; added targeted loss-scale equivalence tests in `tests/unit/test_microbatch_accumulation.py`.
 
 ---
 

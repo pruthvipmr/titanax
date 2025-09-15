@@ -156,7 +156,7 @@ class TestStepFnDecorator:
         def step(state, batch):
             return state, {}
 
-        with pytest.raises(EngineError, match="Batch must be a dictionary"):
+        with pytest.raises(ValueError, match="expects batch to be a mapping"):
             step(self.state, [1, 2, 3])  # List instead of dict
 
     def test_invalid_state_type(self):
@@ -167,7 +167,7 @@ class TestStepFnDecorator:
             return state, {}
 
         invalid_state = {"not": "trainstate"}
-        with pytest.raises(EngineError, match="State must be a TrainState"):
+        with pytest.raises(ValueError, match="must receive a TrainState"):
             step(invalid_state, self.batch)
 
     def test_invalid_metrics_type(self):
@@ -177,24 +177,21 @@ class TestStepFnDecorator:
         def step(state, batch):
             return state, "not_a_dict"
 
-        with pytest.raises(EngineError, match="Step function execution failed"):
+        with pytest.raises(ValueError, match="must return a tuple"):
             step(self.state, self.batch)
 
-    def test_non_scalar_metrics_filtering(self):
-        """Test filtering of non-scalar metrics."""
+    def test_non_scalar_metrics_raise(self):
+        """Non scalar metrics should trigger validation errors."""
 
         @step_fn()
         def step(state, batch):
             return state, {
-                "loss": 1.5,  # Valid scalar
-                "array_metric": jnp.ones((3, 3)),  # Invalid - will be filtered
-                "valid_array": jnp.array(2.0),  # Valid - single element
+                "loss": 1.5,
+                "array_metric": jnp.ones((3, 3)),
             }
 
-        new_state, metrics = step(self.state, self.batch)
-        assert "loss" in metrics
-        assert "valid_array" in metrics
-        assert "array_metric" not in metrics  # Should be filtered
+        with pytest.raises(ValueError, match="must be a scalar"):
+            step(self.state, self.batch)
 
 
 class MockLogger:

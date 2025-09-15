@@ -1,19 +1,131 @@
-"""Step function decoration and compilation for training.
+"""Step function decoration and helper utilities for Titanax training.
 
-This module provides the @step_fn decorator that handles JIT compilation,
-PRNG management, gradient accumulation, and other training utilities.
+This module provides the :func:`@step_fn` decorator as well as gradient
+accumulation helpers used by the execution engine. The decorator is responsible
+for enforcing basic contracts (state/batch types, metric structure) and for
+providing metadata required during compilation.
 """
 
 import functools
-from typing import Any, Callable, Dict, Optional, Union
+import inspect
+from collections.abc import Mapping
+from typing import Any, Callable, Dict, Optional, Union, TYPE_CHECKING
 
 import jax
 import jax.numpy as jnp
 
-from ..compat import pjit, shard_map, PartitionSpec
-
 from ..types import StepFunction, PyTree, Array, BatchData, StepOutput
 from ..exceptions import EngineError
+
+if TYPE_CHECKING:  # pragma: no cover - circular import guard
+    from .engine import TrainState
+
+
+def _get_train_state_type() -> type:
+    """Return the TrainState type without causing circular imports."""
+
+    from .engine import TrainState as _TrainState  # Local import to avoid cycles
+
+    return _TrainState
+
+
+def _validate_train_state(state: Any, func_name: str) -> None:
+    """Ensure the first argument passed to a step function is a TrainState."""
+
+    train_state_type = _get_train_state_type()
+    if not isinstance(state, train_state_type):
+        raise ValueError(
+            (
+                f"Step function '{func_name}' must receive a TrainState as its first argument, "
+                f"got {type(state).__name__}."
+            )
+            + " Fix: update the signature to `def {func_name}(state: TrainState, batch: Mapping[str, Array], ...)`."
+        )
+
+
+def _validate_batch(batch: Any, func_name: str) -> Mapping[str, Any]:
+    """Validate that the batch argument is mapping-like."""
+
+    if not isinstance(batch, Mapping):
+        raise ValueError(
+            (
+                f"Step function '{func_name}' expects batch to be a mapping of arrays, "
+                f"got {type(batch).__name__}."
+            )
+            + " Fix: return dict-like batches from your dataloader (e.g. {'x': ..., 'y': ...})."
+        )
+    return batch
+
+
+def _ensure_scalar_metric(key: str, value: Any, func_name: str) -> float:
+    """Convert a metric value to a scalar float, enforcing shape and dtype rules."""
+
+    # Fast-path for python scalars
+    if isinstance(value, (int, float)):
+        return float(value)
+
+    array_value = jnp.asarray(value)
+
+    if array_value.size != 1:
+        raise ValueError(
+            (
+                f"Metric '{key}' returned from '{func_name}' must be a scalar. "
+                f"Observed shape {array_value.shape}."
+            )
+            + " Fix: reduce the metric before returning it (e.g. jnp.mean or jnp.squeeze)."
+        )
+
+    # Convert to float for logging friendliness
+    return float(array_value.reshape(()))
+
+
+def _validate_metrics_host(metrics: Any, func_name: str) -> Dict[str, float]:
+    """Validate metrics outside of JIT execution and convert to floats."""
+
+    if not isinstance(metrics, Mapping):
+        raise ValueError(
+            (
+                f"Step function '{func_name}' must return a tuple '(state, metrics_dict)'. "
+                f"Got metrics of type {type(metrics).__name__}."
+            )
+            + " Fix: return a dictionary mapping metric names to scalar values."
+        )
+
+    validated: Dict[str, float] = {}
+    for key, value in metrics.items():
+        validated[key] = _ensure_scalar_metric(key, value, func_name)
+
+    return validated
+
+
+def _validate_metrics_tree(metrics: Any, func_name: str) -> Any:
+    """Validate metrics structure during JIT tracing.
+
+    Returns the metrics unchanged but raises ValueError when the metrics cannot
+    be reduced to scalars (e.g. multi-dimensional arrays).
+    """
+
+    if not isinstance(metrics, Mapping):
+        raise ValueError(
+            (
+                f"Step function '{func_name}' must return metrics as a mapping. "
+                f"Got {type(metrics).__name__}."
+            )
+            + " Fix: return a dict like {'loss': loss_value}."
+        )
+
+    for key, value in metrics.items():
+        array_value = jnp.asarray(value)
+        if array_value.size != 1:
+            raise ValueError(
+                (
+                    f"Metric '{key}' returned from '{func_name}' must be reducible to a scalar. "
+                    f"Observed shape {array_value.shape}."
+                )
+                + " Fix: compute a scalar summary before returning it."
+            )
+
+    return metrics
 
 
 def step_fn(
@@ -58,78 +170,72 @@ def step_fn(
     """
 
     def decorator(func: StepFunction) -> StepFunction:
-        """Apply the step function decoration."""
+        """Apply the step function decoration with validation hooks."""
+
+        signature = inspect.signature(func)
+        parameter_names = list(signature.parameters.keys())
+        if len(parameter_names) < 2:
+            raise ValueError(
+                (
+                    f"Step function '{func.__name__}' must accept at least two arguments (state, batch)."
+                )
+                + " Fix: define the function as `def step(state: TrainState, batch: Mapping[str, Array], ...)`."
+            )
+
+        first_param, second_param = parameter_names[0], parameter_names[1]
+
+        def _extract_state_batch(*args: Any, **kwargs: Any) -> tuple[Any, Any]:
+            try:
+                bound = signature.bind_partial(*args, **kwargs)
+            except TypeError as exc:  # Missing required parameters
+                raise ValueError(
+                    (
+                        f"Step function '{func.__name__}' must be called with arguments `(state, batch, ...)`."
+                    )
+                    + f" Fix: {exc}."
+                ) from exc
+            if first_param not in bound.arguments or second_param not in bound.arguments:
+                raise ValueError(
+                    (
+                        f"Step function '{func.__name__}' must be called with positional arguments for state and batch."
+                    )
+                    + " Fix: call it as `step(state, batch, ...)`."
+                )
+            return bound.arguments[first_param], bound.arguments[second_param]
+
+        def _validated_body(*args: Any, **kwargs: Any) -> StepOutput:
+            state, batch = _extract_state_batch(*args, **kwargs)
+            _validate_train_state(state, func.__name__)
+            _validate_batch(batch, func.__name__)
+
+            new_state, metrics = func(*args, **kwargs)
+
+            _validate_train_state(new_state, func.__name__)
+            metrics = _validate_metrics_tree(metrics, func.__name__)
+            return new_state, metrics
 
         @functools.wraps(func)
-        def wrapper(state: PyTree, batch: BatchData) -> StepOutput:
-            """Wrapped step function with validation and error handling."""
+        def wrapper(*args: Any, **kwargs: Any) -> StepOutput:
+            state, batch = _extract_state_batch(*args, **kwargs)
+            _validate_train_state(state, func.__name__)
+            _validate_batch(batch, func.__name__)
 
-            # Input validation (outside JIT)
-            if not isinstance(batch, dict):
-                raise EngineError(
-                    f"Batch must be a dictionary, got {type(batch)}",
-                    suggestion="Ensure your dataloader returns dict-like batches",
-                )
+            new_state, metrics = func(*args, **kwargs)
 
-            # Check that state has required fields (basic validation)
-            if not hasattr(state, "step") or not hasattr(state, "params"):
-                raise EngineError(
-                    "State must be a TrainState with 'step' and 'params' attributes",
-                    suggestion="Use Engine.create_state() to create proper TrainState",
-                )
+            _validate_train_state(new_state, func.__name__)
+            validated_metrics = _validate_metrics_host(metrics, func.__name__)
+            return new_state, validated_metrics
 
-            try:
-                # Execute the original step function
-                new_state, metrics = func(state, batch)
-
-                # Output validation and metric processing (outside JIT)
-                if not isinstance(metrics, dict):
-                    raise EngineError(
-                        f"Step function must return (state, metrics_dict), got metrics type {type(metrics)}",
-                        suggestion="Return a dictionary of metrics as the second element",
-                    )
-
-                # Ensure metrics are scalar values
-                validated_metrics = {}
-                for key, value in metrics.items():
-                    if isinstance(value, (int, float)):
-                        validated_metrics[key] = float(value)
-                    elif hasattr(value, "item"):  # JAX array with single value
-                        try:
-                            validated_metrics[key] = float(value.item())
-                        except Exception:
-                            # Skip if can't convert to scalar
-                            print(
-                                f"Warning: Skipping non-scalar metric '{key}' of type {type(value)}"
-                            )
-                            continue
-                    else:
-                        # Convert to scalar if possible
-                        try:
-                            validated_metrics[key] = float(jnp.asarray(value).item())
-                        except Exception:
-                            # Skip non-scalar metrics with a warning
-                            print(
-                                f"Warning: Skipping non-scalar metric '{key}' of type {type(value)}"
-                            )
-                            continue
-
-                return new_state, validated_metrics
-
-            except Exception as e:
-                raise EngineError(
-                    f"Step function execution failed: {e}",
-                    suggestion="Check your step function implementation for errors",
-                ) from e
-
-        # Store compilation parameters and original function for Engine to use
-        wrapper._original_fn = func  # type: ignore
-        wrapper._is_step_fn = True  # type: ignore
-        wrapper._compile_params = {  # type: ignore
+        # Store compilation parameters and validation metadata
+        wrapper._original_fn = func  # type: ignore[attr-defined]
+        wrapper._validated_fn = _validated_body  # type: ignore[attr-defined]
+        wrapper._is_step_fn = True  # type: ignore[attr-defined]
+        wrapper._compile_params = {  # type: ignore[attr-defined]
             "donate_argnums": donate_argnums,
             "static_argnums": static_argnums,
             "device": device,
         }
+        wrapper._parameter_names = tuple(parameter_names)  # type: ignore[attr-defined]
 
         return wrapper
 
@@ -139,60 +245,6 @@ def step_fn(
 
     # Otherwise, return decorator (used as @step_fn(...))
     return decorator
-
-
-def compile_step_fn_with_mesh(
-    step_fn: StepFunction,
-    mesh: "Mesh",
-    donate_argnums: tuple[int, ...] = (0,),
-    static_argnums: tuple[int, ...] = (),
-    device: Optional[jax.Device] = None,
-) -> StepFunction:
-    """Compile a step function with proper mesh context for collectives.
-
-    This function compiles a step function using shard_map with the provided mesh,
-    enabling collective operations to work correctly.
-
-    Args:
-        step_fn: The step function to compile
-        mesh: JAX mesh for distributed execution
-        donate_argnums: Argument indices to donate
-        static_argnums: Argument indices that are static
-        device: Target device for compilation
-
-    Returns:
-        Compiled step function that works with mesh context
-    """
-    # Get the original function if it was decorated
-    original_fn = getattr(step_fn, "_original_fn", step_fn)
-
-    # Use shard_map to enable collective operations
-    @functools.wraps(original_fn)
-    def shard_mapped_fn(state: PyTree, batch: BatchData) -> StepOutput:
-        """Execute step function with shard_map for collective support."""
-
-        # Create a sharded function that allows collective operations
-        def sharded_step(state, batch):
-            return original_fn(state, batch)
-
-        # Apply shard_map with the mesh
-        with mesh:
-            mapped_fn = shard_map(
-                sharded_step,
-                mesh=mesh,
-                in_specs=(PartitionSpec(), PartitionSpec()),
-                out_specs=(PartitionSpec(), PartitionSpec()),
-            )
-            return mapped_fn(state, batch)
-
-    # JIT the shard_mapped function for performance
-    compiled_fn = jax.jit(
-        shard_mapped_fn,
-        donate_argnums=donate_argnums,
-        static_argnums=static_argnums,
-    )
-
-    return compiled_fn
 
 
 def update_rngs(
@@ -275,6 +327,7 @@ def gradient_accumulation_step(
     state: PyTree,
     batches: list[BatchData],
     accumulate_steps: int,
+    loss_scale: float | None = None,
 ) -> StepOutput:
     """Execute gradient accumulation across multiple microbatches using JAX control flow.
 
@@ -287,6 +340,8 @@ def gradient_accumulation_step(
         state: Current training state
         batches: List of microbatch data (should have length >= accumulate_steps)
         accumulate_steps: Number of accumulation steps
+        loss_scale: Optional scaling factor used to unscale gradients that were
+            computed with loss scaling (e.g. for mixed precision training).
 
     Returns:
         Tuple of (final_state, aggregated_metrics)
@@ -309,6 +364,9 @@ def gradient_accumulation_step(
     if accumulate_steps == 1 or len(batches) == 1:
         # No accumulation needed - single step
         loss, grads = grad_fn(state.params, batches[0])
+        if loss_scale is not None:
+            grads = jax.tree_util.tree_map(lambda g: g / loss_scale, grads)
+            loss = loss / loss_scale
         new_state = apply_fn(state, grads)
         return new_state, {"loss": loss}
 
@@ -330,6 +388,9 @@ def gradient_accumulation_step(
 
         # Compute loss and gradients for this microbatch
         loss, grads = grad_fn(state.params, batch)
+        if loss_scale is not None:
+            grads = jax.tree_util.tree_map(lambda g: g / loss_scale, grads)
+            loss = loss / loss_scale
 
         # Accumulate gradients (tree_map handles PyTree structure)
         accumulated_grads = jax.tree_util.tree_map(
@@ -361,11 +422,21 @@ def gradient_accumulation_step(
     # Compute average loss
     avg_loss = total_loss / accumulate_steps
 
-    return new_state, {"loss": avg_loss, "accumulate_steps": float(accumulate_steps)}
+    metrics = {
+        "loss": avg_loss,
+        "accumulate_steps": float(accumulate_steps),
+    }
+    if loss_scale is not None:
+        metrics["loss_scale"] = float(loss_scale)
+
+    return new_state, metrics
 
 
 def create_gradient_accumulation_step_fn(
-    loss_fn: Callable, accumulate_steps: int = 1
+    loss_fn: Callable,
+    accumulate_steps: int = 1,
+    *,
+    loss_scale: float | None = None,
 ) -> StepFunction:
     """Create a step function that performs gradient accumulation using JAX scan.
 
@@ -375,6 +446,8 @@ def create_gradient_accumulation_step_fn(
     Args:
         loss_fn: Function that computes loss: (params, batch) -> loss
         accumulate_steps: Number of microbatches to accumulate over
+        loss_scale: Optional scaling factor to unscale gradients when using
+            mixed precision loss scaling.
 
     Returns:
         Step function that can be used with Engine.fit()
@@ -397,19 +470,34 @@ def create_gradient_accumulation_step_fn(
         @step_fn()  # type: ignore
         def simple_step(state, batch):
             def compute_loss(params):
-                return loss_fn(params, batch)
+                base_loss = loss_fn(params, batch)
+                if loss_scale is not None:
+                    return base_loss * loss_scale
+                return base_loss
 
             loss, grads = jax.value_and_grad(compute_loss)(state.params)
+            if loss_scale is not None:
+                grads = jax.tree_util.tree_map(lambda g: g / loss_scale, grads)
+                loss = loss / loss_scale
+
             new_state = state.apply_gradients(grads=grads)
-            return new_state, {"loss": loss}
+            metrics = {"loss": loss}
+            if loss_scale is not None:
+                metrics["loss_scale"] = float(loss_scale)
+            return new_state, metrics
 
         return simple_step  # type: ignore
 
     # Create accumulating step function
     def grad_fn(params, batch):
         """Compute loss and gradients for a single microbatch."""
-        loss = loss_fn(params, batch)
-        grads = jax.grad(loss_fn)(params, batch)
+        def scaled_loss(p):
+            base_loss = loss_fn(p, batch)
+            if loss_scale is not None:
+                return base_loss * loss_scale
+            return base_loss
+
+        loss, grads = jax.value_and_grad(scaled_loss)(params)
         return loss, grads
 
     def apply_fn(state, grads):
@@ -435,7 +523,12 @@ def create_gradient_accumulation_step_fn(
             )
 
         return gradient_accumulation_step(
-            grad_fn, apply_fn, state, microbatches, accumulate_steps
+            grad_fn,
+            apply_fn,
+            state,
+            microbatches,
+            accumulate_steps,
+            loss_scale=loss_scale,
         )
 
     return accumulating_step  # type: ignore

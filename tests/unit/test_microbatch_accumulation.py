@@ -167,6 +167,54 @@ class TestGradientAccumulation:
         assert result_state.step == 1
         assert "loss" in metrics
 
+    def test_gradient_accumulation_with_loss_scale(self):
+        """Loss scaling should be unscaled before applying gradients."""
+        accumulate_steps = 2
+        loss_scale = 128.0
+
+        def scaled_grad_fn(params, batch):
+            def scaled_loss(p):
+                return self.simple_loss_fn(p, batch) * loss_scale
+
+            loss, grads = jax.value_and_grad(scaled_loss)(params)
+            return loss, grads
+
+        result_state, metrics = gradient_accumulation_step(
+            scaled_grad_fn,
+            self.simple_apply_fn,
+            self.state,
+            self.microbatches,
+            accumulate_steps=accumulate_steps,
+            loss_scale=loss_scale,
+        )
+
+        # Manually unscale to compare
+        total_grads = None
+        total_loss = 0.0
+        for i in range(accumulate_steps):
+            loss, grads = scaled_grad_fn(self.state.params, self.microbatches[i])
+            total_loss += loss / loss_scale
+            grads = jax.tree_util.tree_map(lambda g: g / loss_scale, grads)
+            if total_grads is None:
+                total_grads = grads
+            else:
+                total_grads = jax.tree_util.tree_map(
+                    lambda acc, new: acc + new, total_grads, grads
+                )
+
+        avg_grads = jax.tree_util.tree_map(
+            lambda g: g / accumulate_steps, total_grads
+        )
+        manual_state = self.simple_apply_fn(self.state, avg_grads)
+
+        assert jnp.allclose(
+            result_state.params["weight"], manual_state.params["weight"], atol=1e-6
+        )
+        assert jnp.allclose(
+            result_state.params["bias"], manual_state.params["bias"], atol=1e-6
+        )
+        assert metrics["loss_scale"] == pytest.approx(loss_scale)
+
 
 class TestStepFnCreation:
     """Test the create_gradient_accumulation_step_fn function."""
@@ -262,6 +310,34 @@ class TestStepFnCreation:
 
         with pytest.raises(EngineError, match="Not enough microbatches"):
             step_fn(state, batch_insufficient)
+
+    def test_create_step_fn_with_loss_scale(self):
+        """Loss scaling should be reported in metrics for accumulate_steps=1."""
+        loss_scale = 32.0
+        step = create_gradient_accumulation_step_fn(
+            self.simple_loss_fn, accumulate_steps=1, loss_scale=loss_scale
+        )
+
+        state = TrainState(
+            params=self.params,
+            opt_state={},
+            step=0,
+            rngs={"dropout": jax.random.PRNGKey(0)},
+            _optimizer=Mock(),
+        )
+
+        def mock_apply_gradients(grads=None, **kwargs):
+            new_params = jax.tree_util.tree_map(
+                lambda p, g: p - 0.01 * g, state.params, grads
+            )
+            return state.replace(params=new_params, step=state.step + 1)
+
+        state.apply_gradients = mock_apply_gradients
+
+        batch = {"x": jnp.array([[1.0, 0.0]]), "y": jnp.array([1.0])}
+        _, metrics = step(state, batch)
+
+        assert metrics["loss_scale"] == pytest.approx(loss_scale)
 
 
 class TestEngineIntegration:
