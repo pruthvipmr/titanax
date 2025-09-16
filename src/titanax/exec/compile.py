@@ -80,6 +80,7 @@ def compile_step_with_plan(
     mesh_size = getattr(mesh_devices, "size", None)
 
     if mesh_size == 1:
+
         @functools.wraps(body)
         def single_device_fn(*args: Any, **kwargs: Any):
             with mesh:
