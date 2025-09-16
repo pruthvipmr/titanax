@@ -194,7 +194,10 @@ def step_fn(
                     )
                     + f" Fix: {exc}."
                 ) from exc
-            if first_param not in bound.arguments or second_param not in bound.arguments:
+            if (
+                first_param not in bound.arguments
+                or second_param not in bound.arguments
+            ):
                 raise ValueError(
                     (
                         f"Step function '{func.__name__}' must be called with positional arguments for state and batch."
@@ -491,6 +494,7 @@ def create_gradient_accumulation_step_fn(
     # Create accumulating step function
     def grad_fn(params, batch):
         """Compute loss and gradients for a single microbatch."""
+
         def scaled_loss(p):
             base_loss = loss_fn(p, batch)
             if loss_scale is not None:

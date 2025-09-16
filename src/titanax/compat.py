@@ -59,6 +59,7 @@ psum_scatter: Optional[Callable[..., Any]] = None
 
 try:
     from jax.lax import psum, pmean, pmax, pmin, all_gather, psum_scatter  # type: ignore
+
     try:
         from jax.lax import reduce_scatter_p  # type: ignore
     except ImportError:
@@ -121,6 +122,7 @@ tree_leaves: Optional[Callable[..., Any]] = None
 try:
     # New tree API (JAX >= 0.4.20)
     from jax import tree_util  # type: ignore
+
     tree_map = tree_util.tree_map
     tree_flatten = tree_util.tree_flatten
     tree_unflatten = tree_util.tree_unflatten
@@ -139,6 +141,7 @@ except ImportError:
 # Version compatibility utilities
 # =============================================================================
 
+
 def get_jax_version() -> str:
     """Get the current JAX version string."""
     return jax.__version__
@@ -146,7 +149,7 @@ def get_jax_version() -> str:
 
 def check_jax_compatibility() -> bool:
     """Check if the current JAX version is compatible with Titanax.
-    
+
     Returns:
         True if JAX version is supported, False otherwise
     """
@@ -157,18 +160,18 @@ def check_jax_compatibility() -> bool:
             warnings.warn(
                 f"JAX {version} does not provide pjit or shard_map. "
                 "Please upgrade to a newer JAX version (>= 0.4.0) for full Titanax functionality.",
-                UserWarning
+                UserWarning,
             )
             return False
-        
+
         if Mesh is None or PartitionSpec is None:
             warnings.warn(
                 f"JAX {version} does not provide sharding APIs. "
                 "Please upgrade to a newer JAX version (>= 0.4.0) for full Titanax functionality.",
-                UserWarning
+                UserWarning,
             )
             return False
-            
+
         return True
     except Exception:
         return False
@@ -177,6 +180,7 @@ def check_jax_compatibility() -> bool:
 # =============================================================================
 # Preferred API selection
 # =============================================================================
+
 
 def get_preferred_pjit() -> Optional[Callable[..., Any]]:
     """Get the preferred pjit function for the current JAX version."""
@@ -194,12 +198,14 @@ def get_preferred_shard_map() -> Optional[Callable[..., Any]]:
 
 def has_collective_support() -> bool:
     """Check if the current JAX version has full collective operation support."""
-    return all([
-        psum is not None,
-        pmean is not None,
-        all_gather is not None,
-        ppermute is not None
-    ])
+    return all(
+        [
+            psum is not None,
+            pmean is not None,
+            all_gather is not None,
+            ppermute is not None,
+        ]
+    )
 
 
 # =============================================================================
@@ -208,6 +214,7 @@ def has_collective_support() -> bool:
 
 # Run compatibility check on import
 _compatibility_checked = False
+
 
 def ensure_compatibility() -> None:
     """Ensure JAX compatibility, warn if issues found."""
@@ -229,32 +236,28 @@ __all__ = [
     # Core compilation functions
     "pjit",
     "shard_map",
-    
     # Sharding utilities
     "Mesh",
-    "PartitionSpec", 
+    "PartitionSpec",
     "NamedSharding",
     "sharding_module",
-    
     # Collective operations
     "psum",
     "pmean",
     "pmax",
-    "pmin", 
+    "pmin",
     "all_gather",
-    "reduce_scatter_p", 
+    "reduce_scatter_p",
     "psum_scatter",
     "ppermute",
     "pshuffle",
     "axis_index",
-    
     # Tree utilities
     "tree_map",
     "tree_flatten",
     "tree_unflatten",
     "tree_structure",
     "tree_leaves",
-    
     # Utility functions
     "get_jax_version",
     "check_jax_compatibility",

@@ -151,7 +151,7 @@ __all__ = [
     "TP",
     "PP",
     "Stage",
-    "StageProtocol", 
+    "StageProtocol",
     "PipelineSchedule",
     "create_simple_stage",
     "create_1f1b_schedule",

@@ -19,7 +19,11 @@ AxisName = str
 
 # Device and sharding types
 Device = jax.Device
-Sharding = sharding_module.Sharding if sharding_module and hasattr(sharding_module, 'Sharding') else None
+Sharding = (
+    sharding_module.Sharding
+    if sharding_module and hasattr(sharding_module, "Sharding")
+    else None
+)
 
 # Parameter and gradient types
 Params = PyTree

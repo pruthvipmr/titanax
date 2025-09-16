@@ -94,10 +94,7 @@ class MeshSpec:
 
         # Sort devices deterministically to ensure consistent ordering across hosts
         # Use lexicographic ordering by (platform, process_index, id) for stability
-        devices = sorted(
-            devices, 
-            key=lambda d: (d.platform, d.process_index, d.id)
-        )
+        devices = sorted(devices, key=lambda d: (d.platform, d.process_index, d.id))
 
         return devices
 
@@ -156,7 +153,7 @@ class MeshSpec:
         self, device_count: int, num_factors: Optional[int] = None
     ) -> Tuple[int, ...]:
         """Factorize device count into balanced dimensions.
-        
+
         Uses deterministic algorithm to ensure consistent results across hosts.
         """
         if num_factors is None:

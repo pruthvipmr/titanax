@@ -202,9 +202,7 @@ class TestGradientAccumulation:
                     lambda acc, new: acc + new, total_grads, grads
                 )
 
-        avg_grads = jax.tree_util.tree_map(
-            lambda g: g / accumulate_steps, total_grads
-        )
+        avg_grads = jax.tree_util.tree_map(lambda g: g / accumulate_steps, total_grads)
         manual_state = self.simple_apply_fn(self.state, avg_grads)
 
         assert jnp.allclose(
