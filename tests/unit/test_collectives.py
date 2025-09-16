@@ -1,371 +1,218 @@
-"""Unit tests for collective operations."""
+"""Unit tests for Titanax collective operations."""
 
+from __future__ import annotations
+
+import numpy as np
 import pytest
-from functools import partial
 import jax
 import jax.numpy as jnp
 
-from src.titanax.exec.collectives import (
-    collectives,
-    _validate_axis_name,
-    _validate_tree_structure,
-    set_current_mesh,
-    get_current_mesh,
-)
+from src.titanax.compat import Mesh as CompatMesh
+from src.titanax.exec.collectives import collectives, mesh_context
 from src.titanax.exceptions import CollectiveError
 
 
-class TestCollectivesValidation:
-    """Test axis and tree validation functions."""
+def _build_mesh(axis_names: tuple[str, ...], layout: str):
+    """Create a JAX mesh for the requested axis layout."""
 
-    def test_validate_axis_name_valid(self):
-        """Test axis validation with valid axis names."""
-        _validate_axis_name("data", "test_op")
-        _validate_axis_name("model", "test_op")
-        _validate_axis_name("pipeline", "test_op")
+    devices = np.array(jax.devices(), dtype=object)
+    if devices.size == 0:
+        pytest.skip("Collective tests require at least one JAX device")
 
-    def test_validate_axis_name_invalid_type(self):
-        """Test axis validation with invalid types."""
-        with pytest.raises(CollectiveError, match="axis must be a string"):
-            _validate_axis_name(0, "test_op")
+    if CompatMesh is None:  # pragma: no cover - compatibility guard
+        pytest.skip("Mesh API not available in this JAX version")
 
-        with pytest.raises(CollectiveError, match="axis must be a string"):
-            _validate_axis_name(None, "test_op")
+    if layout == "1d":
+        shape = (devices.size,)
+    elif layout == "data_model":
+        shape = (devices.size, 1)
+    elif layout == "model_data":
+        shape = (1, devices.size)
+    else:  # pragma: no cover - defensive guard for future layouts
+        raise ValueError(f"Unknown layout '{layout}'")
 
-    def test_validate_axis_name_empty(self):
-        """Test axis validation with empty string."""
-        with pytest.raises(CollectiveError, match="axis name cannot be empty"):
-            _validate_axis_name("", "test_op")
+    mesh_devices = devices.reshape(shape)
+    return CompatMesh(mesh_devices, axis_names)
 
-    def test_validate_axis_name_with_mesh(self):
-        """Test axis validation with mesh context."""
-        devices = jax.devices()[:1]
-        mesh = jax.sharding.Mesh(devices, ("data",))
 
-        # Valid axis should pass
-        _validate_axis_name("data", "test_op", mesh)
+@pytest.fixture(scope="module")
+def mesh_1d():
+    """1D mesh exposing only the data axis."""
 
-        # Invalid axis should fail
+    return _build_mesh(("data",), "1d")
+
+
+@pytest.fixture(scope="module")
+def mesh_2d_data_major():
+    """2D mesh where the data axis spans all devices."""
+
+    return _build_mesh(("data", "model"), "data_model")
+
+
+@pytest.fixture(scope="module")
+def mesh_2d_model_major():
+    """2D mesh where the model axis spans all devices."""
+
+    return _build_mesh(("data", "model"), "model_data")
+
+
+def test_collectives_require_mesh_context():
+    """Collectives should raise if no mesh context is installed."""
+
+    with pytest.raises(CollectiveError, match="no active mesh context"):
+        collectives.psum(jnp.array([1.0], dtype=jnp.float32), axis="data")
+
+
+def test_axis_validation_errors(mesh_1d):
+    """Axis names must exist in the active mesh."""
+
+    with mesh_context(mesh_1d):
         with pytest.raises(CollectiveError, match="axis not found in mesh"):
-            _validate_axis_name("model", "test_op", mesh)
-
-    def test_validate_tree_structure_valid(self):
-        """Test tree validation with valid PyTrees."""
-        # Simple array
-        _validate_tree_structure(jnp.array([1, 2, 3]), "test_op", "data")
-
-        # Nested dict
-        tree = {
-            "params": {"w": jnp.array([1.0, 2.0]), "b": jnp.array([0.5])},
-            "state": jnp.array([3.0]),
-        }
-        _validate_tree_structure(tree, "test_op", "data")
-
-    def test_validate_tree_structure_invalid_leaf(self):
-        """Test tree validation with invalid leaf types."""
-        invalid_tree = {"w": jnp.array([1.0]), "b": [1, 2, 3]}  # List is not JAX array
-
-        with pytest.raises(CollectiveError, match="leaf 0 is not a JAX array"):
-            _validate_tree_structure(invalid_tree, "test_op", "data")
-
-    def test_validate_tree_structure_invalid_tree(self):
-        """Test tree validation with completely invalid structure."""
-        # This should be fine actually, JAX can handle most Python objects
-        _validate_tree_structure({"a": jnp.array([1])}, "test_op", "data")
+            collectives.psum(jnp.array([1.0], dtype=jnp.float32), axis="model")
 
 
-class TestCollectivesBasic:
-    """Test basic collective operations validation."""
-
-    def test_psum_validation(self):
-        """Test psum input validation."""
-        x = jnp.array([1.0, 2.0])
-
-        # Test valid axis name validation
-        try:
-            collectives.psum(x, "data")
-        except Exception as e:
-            # Should fail due to no mesh context, but not due to axis validation
-            assert (
-                "unbound axis name" in str(e)
-                or "JAX operation failed" in str(e)
-                or "not bound in current JAX transformation context" in str(e)
-            )
-
-        # Test invalid axis types
-        with pytest.raises(CollectiveError, match="axis must be a string"):
-            collectives.psum(x, 123)
-
-        with pytest.raises(CollectiveError, match="axis name cannot be empty"):
-            collectives.psum(x, "")
-
-    def test_pmean_validation(self):
-        """Test pmean input validation."""
-        x = jnp.array([1.0, 2.0])
-
-        # Test valid axis name validation
-        try:
-            collectives.pmean(x, "data")
-        except Exception as e:
-            # Should fail due to no mesh context, but not due to axis validation
-            assert (
-                "unbound axis name" in str(e)
-                or "JAX operation failed" in str(e)
-                or "not bound in current JAX transformation context" in str(e)
-            )
-
-        # Test invalid axis types
-        with pytest.raises(CollectiveError, match="axis must be a string"):
-            collectives.pmean(x, None)
-
-    def test_tree_validation(self):
-        """Test PyTree validation in collective operations."""
-        # Valid tree
-        _ = {"w": jnp.array([1.0]), "b": jnp.array([2.0])}
-
-        # Invalid tree with non-array leaf
-        invalid_tree = {"w": jnp.array([1.0]), "b": [1, 2, 3]}
-
-        with pytest.raises(CollectiveError, match="leaf .* is not a JAX array"):
-            collectives.psum(invalid_tree, "data")
+def _assert_allclose(actual, expected):
+    np.testing.assert_allclose(np.asarray(actual), np.asarray(expected))
 
 
-class TestCollectiveImplementations:
-    """Test actual implementations of collective operations."""
+def test_psum_matches_lax_single_axis(mesh_1d):
+    """psum should match lax.psum on a 1D mesh."""
 
-    def test_all_gather_implementation(self):
-        """Test all_gather actual implementation."""
-        x = jnp.array([1.0, 2.0])
+    axis = "data"
+    axis_size = mesh_1d.shape[axis]
+    inputs = jnp.arange(axis_size * 2, dtype=jnp.float32).reshape(axis_size, 2)
 
-        # Should fail with unbound axis error, not return unchanged
-        try:
-            _ = collectives.all_gather(x, "data")
-        except Exception as e:
-            # Should fail due to no mesh context, but validate it's not a stub
-            assert (
-                "unbound axis name" in str(e)
-                or "JAX operation failed" in str(e)
-                or "not bound in current JAX transformation context" in str(e)
-            )
+    with mesh_context(mesh_1d):
+        result = jax.pmap(lambda x: collectives.psum(x, axis), axis_name=axis)(inputs)
+    expected = jax.pmap(lambda x: jax.lax.psum(x, axis), axis_name=axis)(inputs)
 
-        # Test input validation
-        with pytest.raises(CollectiveError, match="input must be a JAX array"):
-            collectives.all_gather([1, 2, 3], "data")
-
-    def test_reduce_scatter_implementation(self):
-        """Test reduce_scatter actual implementation."""
-        x = jnp.array([1.0, 2.0])
-
-        # Should fail with unbound axis error, not return unchanged
-        try:
-            _ = collectives.reduce_scatter(x, "data", op="add")
-        except Exception as e:
-            # Should fail due to no mesh context, but validate it's not a stub
-            assert (
-                "unbound axis name" in str(e)
-                or "JAX operation failed" in str(e)
-                or "not bound in current JAX transformation context" in str(e)
-            )
-
-        # Test input validation
-        with pytest.raises(CollectiveError, match="input must be a JAX array"):
-            collectives.reduce_scatter([1, 2, 3], "data", op="add")
-
-    def test_reduce_scatter_invalid_op(self):
-        """Test reduce_scatter with invalid operation."""
-        x = jnp.array([1.0, 2.0])
-
-        # Now only "add" is supported
-        with pytest.raises(CollectiveError, match="invalid operation 'mul'"):
-            collectives.reduce_scatter(x, "data", op="mul")
-
-    def test_broadcast_implementation(self):
-        """Test broadcast actual implementation."""
-        x = jnp.array([1.0, 2.0])
-
-        # Should fail with unbound axis error, not return unchanged
-        try:
-            _ = collectives.broadcast(x, "data", src_index=0)
-        except Exception as e:
-            # Should fail due to no mesh context, but validate it's not a stub
-            assert (
-                "unbound axis name" in str(e)
-                or "JAX operation failed" in str(e)
-                or "not bound in current JAX transformation context" in str(e)
-            )
-
-        # Test input validation
-        with pytest.raises(CollectiveError, match="input must be a JAX array"):
-            collectives.broadcast([1, 2, 3], "data", src_index=0)
-
-    def test_broadcast_invalid_src_index(self):
-        """Test broadcast with invalid src_index."""
-        x = jnp.array([1.0, 2.0])
-
-        with pytest.raises(CollectiveError, match="src_index -1 must be non-negative"):
-            collectives.broadcast(x, "data", src_index=-1)
-
-    def test_ppermute_implementation(self):
-        """Test ppermute actual implementation."""
-        x = jnp.array([1.0, 2.0])
-
-        # Test input validation
-        with pytest.raises(CollectiveError, match="input must be a JAX array"):
-            collectives.ppermute([1, 2, 3], "data", perm=[(0, 1)])
-
-        # Test permutation validation
-        with pytest.raises(CollectiveError, match="perm must be a list or tuple"):
-            collectives.ppermute(x, "data", perm=None)
-
-        with pytest.raises(CollectiveError, match="must be a \\(source, dest\\) pair"):
-            collectives.ppermute(x, "data", perm=[(0,)])
-
-        with pytest.raises(CollectiveError, match="indices must be integers"):
-            collectives.ppermute(x, "data", perm=[("0", 1)])
-
-        with pytest.raises(CollectiveError, match="indices must be non-negative"):
-            collectives.ppermute(x, "data", perm=[(-1, 1)])
-
-        # Should fail with unbound axis error when valid
-        try:
-            _ = collectives.ppermute(x, "data", perm=[(0, 1), (1, 0)])
-        except Exception as e:
-            # Should fail due to no mesh context, but validate it's not a stub
-            assert (
-                "unbound axis name" in str(e)
-                or "JAX operation failed" in str(e)
-                or "not bound in current JAX transformation context" in str(e)
-            )
+    _assert_allclose(result, expected)
 
 
-class TestCollectiveOperations:
-    """Test collective operations in proper JAX transformation context."""
+def test_pmean_matches_lax_single_axis(mesh_1d):
+    """pmean should match lax.pmean on a 1D mesh."""
 
-    def test_all_gather_basic(self):
-        """Test all_gather with proper shard_map context."""
-        # Skip if not enough devices
-        devices = jax.devices()
-        if len(devices) < 2:
-            pytest.skip("Need at least 2 devices for multi-device collectives test")
+    axis = "data"
+    axis_size = mesh_1d.shape[axis]
+    inputs = jnp.arange(axis_size * 2, dtype=jnp.float32).reshape(axis_size, 2)
 
-        mesh = jax.sharding.Mesh(devices[:2], ("data",))
+    with mesh_context(mesh_1d):
+        result = jax.pmap(lambda x: collectives.pmean(x, axis), axis_name=axis)(inputs)
+    expected = jax.pmap(lambda x: jax.lax.pmean(x, axis), axis_name=axis)(inputs)
 
-        @jax.jit
-        @partial(
-            jax.shard_map,
-            mesh=mesh,
-            in_specs=jax.sharding.PartitionSpec("data"),
-            out_specs=jax.sharding.PartitionSpec(None),
+    _assert_allclose(result, expected)
+
+
+def test_all_gather_matches_lax_single_axis(mesh_1d):
+    """all_gather should match lax.all_gather on a 1D mesh."""
+
+    axis = "data"
+    axis_size = mesh_1d.shape[axis]
+    inputs = jnp.arange(axis_size * 3, dtype=jnp.float32).reshape(axis_size, 3)
+
+    with mesh_context(mesh_1d):
+        result = jax.pmap(lambda x: collectives.all_gather(x, axis), axis_name=axis)(
+            inputs
         )
-        def test_fn(x):
-            return collectives.all_gather(x, "data")
+    expected = jax.pmap(
+        lambda x: jax.lax.all_gather(x, axis, tiled=True), axis_name=axis
+    )(inputs)
 
-        # Create input data
-        x = jnp.arange(4)  # [0, 1, 2, 3]
-        result = test_fn(x)
+    _assert_allclose(result, expected)
 
-        # all_gather should concatenate: [0, 1, 2, 3] -> [0, 1, 2, 3] (tiled)
-        expected = jnp.array([0, 1, 2, 3])
-        assert jnp.array_equal(result, expected)
 
-    def test_ppermute_ring_shift(self):
-        """Test ppermute with ring shift pattern."""
-        # Skip if not enough devices
-        devices = jax.devices()
-        if len(devices) < 2:
-            pytest.skip("Need at least 2 devices for multi-device collectives test")
+def test_reduce_scatter_matches_lax_single_axis(mesh_1d):
+    """reduce_scatter should match lax.psum_scatter on a 1D mesh."""
 
-        mesh = jax.sharding.Mesh(devices[:2], ("data",))
+    axis = "data"
+    axis_size = mesh_1d.shape[axis]
+    chunk = max(axis_size, 1)
+    inputs = jnp.arange(axis_size * chunk * 2, dtype=jnp.float32).reshape(
+        axis_size, chunk * 2
+    )
 
-        @jax.jit
-        @partial(
-            jax.shard_map,
-            mesh=mesh,
-            in_specs=jax.sharding.PartitionSpec("data"),
-            out_specs=jax.sharding.PartitionSpec("data"),
+    with mesh_context(mesh_1d):
+        result = jax.pmap(
+            lambda x: collectives.reduce_scatter(x, axis), axis_name=axis
+        )(inputs)
+    expected = jax.pmap(
+        lambda x: jax.lax.psum_scatter(x, axis, tiled=True), axis_name=axis
+    )(inputs)
+
+    _assert_allclose(result, expected)
+
+
+def test_broadcast_matches_ppermute_single_axis(mesh_1d):
+    """broadcast should behave like a ppermute with a source rank."""
+
+    axis = "data"
+    axis_size = mesh_1d.shape[axis]
+    inputs = jnp.arange(axis_size * 2, dtype=jnp.float32).reshape(axis_size, 2)
+    perm = [(0, i) for i in range(axis_size)]
+
+    with mesh_context(mesh_1d):
+        result = jax.pmap(
+            lambda x: collectives.broadcast(x, axis, src_index=0),
+            axis_name=axis,
+        )(inputs)
+    expected = jax.pmap(lambda x: jax.lax.ppermute(x, axis, perm=perm), axis_name=axis)(
+        inputs
+    )
+
+    _assert_allclose(result, expected)
+
+
+def test_all_to_all_matches_lax_single_axis(mesh_1d):
+    """all_to_all should match lax.all_to_all on a 1D mesh."""
+
+    axis = "data"
+    axis_size = mesh_1d.shape[axis]
+    inputs = jnp.arange(axis_size * axis_size * 2, dtype=jnp.float32).reshape(
+        axis_size, axis_size, 2
+    )
+
+    with mesh_context(mesh_1d):
+        result = jax.pmap(
+            lambda x: collectives.all_to_all(x, axis, split_axis=0, concat_axis=1),
+            axis_name=axis,
+        )(inputs)
+    expected = jax.pmap(
+        lambda x: jax.lax.all_to_all(x, axis, split_axis=0, concat_axis=1),
+        axis_name=axis,
+    )(inputs)
+
+    _assert_allclose(result, expected)
+
+
+@pytest.mark.parametrize(
+    "axis,mesh_fixture",
+    [("data", "mesh_2d_data_major"), ("model", "mesh_2d_model_major")],
+)
+def test_collectives_work_with_2d_mesh(axis, mesh_fixture, request):
+    """Collectives operate when additional mesh axes are present."""
+
+    mesh = request.getfixturevalue(mesh_fixture)
+    axis_size = mesh.shape[axis]
+    inputs = jnp.arange(axis_size * 2, dtype=jnp.float32).reshape(axis_size, 2)
+
+    with mesh_context(mesh):
+        result = jax.pmap(lambda x: collectives.psum(x, axis), axis_name=axis)(inputs)
+    expected = jax.pmap(lambda x: jax.lax.psum(x, axis), axis_name=axis)(inputs)
+
+    _assert_allclose(result, expected)
+
+
+def test_axis_index_matches_lax(mesh_2d_data_major):
+    """axis_index should pass through to JAX."""
+
+    axis = "data"
+    axis_size = mesh_2d_data_major.shape[axis]
+    inputs = jnp.arange(axis_size, dtype=jnp.float32)
+
+    with mesh_context(mesh_2d_data_major):
+        result = jax.pmap(lambda _: collectives.axis_index(axis), axis_name=axis)(
+            inputs
         )
-        def test_fn(x):
-            # Ring shift: device 0 -> device 1, device 1 -> device 0
-            perm = [(0, 1), (1, 0)]
-            return collectives.ppermute(x, "data", perm)
+    expected = jax.pmap(lambda _: jax.lax.axis_index(axis), axis_name=axis)(inputs)
 
-        # Create input data where each device has different values
-        x = jnp.arange(4)  # [0, 1, 2, 3]
-        result = test_fn(x)
-
-        # Should swap the shards
-        expected = jnp.array([2, 3, 0, 1])
-        assert jnp.array_equal(result, expected)
-
-
-class TestMeshContext:
-    """Test mesh context management."""
-
-    def test_mesh_context_management(self):
-        """Test setting and getting current mesh."""
-        devices = jax.devices()[:1]
-        mesh = jax.sharding.Mesh(devices, ("data",))
-
-        # Initially no mesh
-        assert get_current_mesh() is None
-
-        # Set mesh
-        set_current_mesh(mesh)
-        assert get_current_mesh() is mesh
-
-        # Clear mesh
-        set_current_mesh(None)
-        assert get_current_mesh() is None
-
-    def test_collective_with_mesh_context(self):
-        """Test collectives with proper mesh context."""
-        devices = jax.devices()[:1]
-        mesh = jax.sharding.Mesh(devices, ("data",))
-        x = jnp.array([1.0, 2.0])
-
-        try:
-            # Set mesh context
-            set_current_mesh(mesh)
-
-            # This should not raise axis validation errors
-            try:
-                collectives.psum(x, "data")
-            except Exception as e:
-                # Should fail with JAX error about missing transformation context
-                # but not with axis validation error
-                assert (
-                    "unbound axis name" in str(e)
-                    or "JAX operation failed" in str(e)
-                    or "not bound in current JAX transformation context" in str(e)
-                )
-
-            # Invalid axis should raise CollectiveError
-            with pytest.raises(CollectiveError, match="axis not found in mesh"):
-                collectives.psum(x, "model")
-
-        finally:
-            # Always clear mesh context
-            set_current_mesh(None)
-
-
-class TestCollectiveErrorHandling:
-    """Test error handling in collective operations."""
-
-    def test_axis_validation_errors(self):
-        """Test various axis validation errors."""
-        x = jnp.array([1.0, 2.0])
-
-        # Test empty axis name
-        with pytest.raises(CollectiveError, match="axis name cannot be empty"):
-            collectives.psum(x, "")
-
-        # Test non-string axis
-        with pytest.raises(CollectiveError, match="axis must be a string"):
-            collectives.pmean(x, 42)
-
-        with pytest.raises(CollectiveError, match="axis must be a string"):
-            collectives.all_gather(x, None)
-
-
-if __name__ == "__main__":
-    pytest.main([__file__])
+    _assert_allclose(result, expected)

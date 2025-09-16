@@ -3,9 +3,32 @@
 This module provides type aliases and protocols used throughout the Titanax framework.
 """
 
-from typing import Any, Dict, Tuple, Union, Protocol, runtime_checkable
+from typing import Any, Dict, Tuple, Union, Protocol, runtime_checkable, TYPE_CHECKING
 import jax
-from .compat import PartitionSpec, Mesh, NamedSharding, sharding_module
+
+if TYPE_CHECKING:
+    from jax.sharding import (
+        Mesh as MeshType,
+        PartitionSpec as PartitionSpecType,
+        NamedSharding as NamedShardingType,
+        Sharding as _JaxSharding,
+    )
+else:  # pragma: no cover - fallback for older JAX versions without sharding
+    from .compat import (
+        Mesh as MeshType,
+        PartitionSpec as PartitionSpecType,
+        NamedSharding as NamedShardingType,
+        sharding_module,
+    )
+
+    if sharding_module and hasattr(sharding_module, "Sharding"):
+        _JaxSharding = getattr(sharding_module, "Sharding")  # type: ignore[assignment]
+    else:
+        _JaxSharding = Any  # type: ignore[assignment]
+
+Mesh = MeshType
+PartitionSpec = PartitionSpecType
+NamedSharding = NamedShardingType
 
 # JAX/PyTree type aliases
 PyTree = Any  # JAX PyTree - nested structure of arrays
@@ -19,11 +42,7 @@ AxisName = str
 
 # Device and sharding types
 Device = jax.Device
-Sharding = (
-    sharding_module.Sharding
-    if sharding_module and hasattr(sharding_module, "Sharding")
-    else None
-)
+Sharding = _JaxSharding
 
 # Parameter and gradient types
 Params = PyTree

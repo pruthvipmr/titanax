@@ -37,13 +37,17 @@ class TestCompatImports:
         """Test that collective operations are available."""
         assert psum is not None, "psum should be available"
         assert pmean is not None, "pmean should be available"
-        # all_gather and ppermute might be None in some versions
+        if all_gather is not None:
+            assert callable(all_gather)
+        if ppermute is not None:
+            assert callable(ppermute)
 
     def test_sharding_types_imported(self):
         """Test that sharding types are available."""
         assert PartitionSpec is not None, "PartitionSpec should be available"
         assert Mesh is not None, "Mesh should be available"
-        # NamedSharding might be None in older versions
+        if NamedSharding is not None:
+            assert hasattr(NamedSharding, "__name__")
 
     def test_compatibility_functions_work(self):
         """Test that compatibility utility functions work."""

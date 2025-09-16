@@ -54,11 +54,20 @@ pmean: Optional[Callable[..., Any]] = None
 pmax: Optional[Callable[..., Any]] = None
 pmin: Optional[Callable[..., Any]] = None
 all_gather: Optional[Callable[..., Any]] = None
+all_to_all: Optional[Callable[..., Any]] = None
 reduce_scatter_p: Optional[Callable[..., Any]] = None
 psum_scatter: Optional[Callable[..., Any]] = None
 
 try:
-    from jax.lax import psum, pmean, pmax, pmin, all_gather, psum_scatter  # type: ignore
+    from jax.lax import (  # type: ignore
+        psum,
+        pmean,
+        pmax,
+        pmin,
+        all_gather,
+        all_to_all,
+        psum_scatter,
+    )
 
     try:
         from jax.lax import reduce_scatter_p  # type: ignore
@@ -71,6 +80,14 @@ except ImportError:
     except ImportError:
         psum = None
         pmean = None
+    try:
+        from jax.lax import all_gather  # type: ignore
+    except ImportError:
+        all_gather = None
+    try:
+        from jax.lax import all_to_all  # type: ignore
+    except ImportError:
+        all_to_all = None
     try:
         from jax.lax import psum_scatter  # type: ignore
     except ImportError:

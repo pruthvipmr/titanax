@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Dict, Optional, Sequence
+from typing import Dict, Optional
 
 import jax
 import jax.numpy as jnp
@@ -31,7 +31,7 @@ def _to_key(seed: int | Array) -> Array:
     return array
 
 
-def _mesh_shape(mesh: Mesh) -> Sequence[int]:
+def _mesh_shape(mesh: Mesh) -> tuple[int, ...]:
     """Return the mesh device shape as a tuple of ints."""
 
     return tuple(int(size) for size in mesh.devices.shape)

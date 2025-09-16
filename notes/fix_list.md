@@ -111,15 +111,17 @@ This document enumerates **all fixes, changes, and additions** to address before
 
 ## 4) Collectives Namespace
 
-- [ ] **Axis‑validated collectives coverage**
+- [x] **Axis‑validated collectives coverage**
   - **Where:** `titanax/exec/collectives.py`
   - **Add:** `psum`, `pmean`, `all_gather`, `reduce_scatter`, `broadcast`, `all_to_all` with: (a) mesh/axis validation, (b) PyTree support, (c) docstrings with shape semantics.
   - **DoD:** Unit tests for each op on 1D “data” axis and 2D (“data”, “model”) meshes.
 
-- [ ] **Thread‑local mesh context**
+- [x] **Thread‑local mesh context**
   - **Where:** `titanax/exec/collectives.py`
   - **Add:** Context manager `with mesh_context(mesh):` so collectives verify axis names at runtime even under nested jits.
   - **DoD:** Mis-specified axis raises a custom `CollectiveError` with suggestions.
+
+**✅ COMPLETED:** Rebuilt the collectives namespace with PyTree-aware wrappers around all required primitives, thread-local mesh validation, and richer error handling. Added a public `mesh_context` helper and exported it through `titanax.exec`. Comprehensive unit tests exercise every collective across both 1D and 2D mesh layouts, verifying behaviour against the corresponding `jax.lax` primitives.
 
 ---
 

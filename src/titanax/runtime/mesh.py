@@ -6,10 +6,14 @@ and utilities for building JAX meshes with validation.
 
 import dataclasses
 import math
-from typing import Optional, Tuple, List, Dict, Any, Union
+from typing import Optional, Tuple, List, Dict, Any, Union, TYPE_CHECKING, cast
 
 import numpy as np
-from ..compat import sharding_module as sharding
+
+if TYPE_CHECKING:
+    from jax import sharding as sharding
+else:
+    from ..compat import sharding_module as sharding
 
 from ..exceptions import MeshError, mesh_validation_error
 from ..types import Device, Mesh
@@ -212,7 +216,13 @@ class MeshSpec:
             # Reshape devices into mesh topology
             device_array = np.array(devices).reshape(shape)
 
-            mesh = sharding.Mesh(device_array, self.axes)
+            if sharding is None or not hasattr(sharding, "Mesh"):
+                raise mesh_validation_error(
+                    "JAX sharding Mesh API is unavailable",
+                    "Ensure you are running on a JAX version with multi-device sharding support",
+                )
+
+            mesh = cast("Mesh", sharding.Mesh(device_array, self.axes))
             return mesh
 
         except MeshError:

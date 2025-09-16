@@ -9,7 +9,7 @@ providing metadata required during compilation.
 import functools
 import inspect
 from collections.abc import Mapping
-from typing import Any, Callable, Dict, Optional, Union, TYPE_CHECKING
+from typing import Any, Callable, Dict, Optional, Union
 
 import jax
 import jax.numpy as jnp
@@ -17,8 +17,11 @@ import jax.numpy as jnp
 from ..types import StepFunction, PyTree, Array, BatchData, StepOutput
 from ..exceptions import EngineError
 
-if TYPE_CHECKING:  # pragma: no cover - circular import guard
-    from .engine import TrainState
+
+def _function_name(func: Any) -> str:
+    """Return a human-readable function name for error messages."""
+
+    return getattr(func, "__name__", getattr(func, "__qualname__", type(func).__name__))
 
 
 def _get_train_state_type() -> type:
@@ -172,12 +175,13 @@ def step_fn(
     def decorator(func: StepFunction) -> StepFunction:
         """Apply the step function decoration with validation hooks."""
 
+        func_name = _function_name(func)
         signature = inspect.signature(func)
         parameter_names = list(signature.parameters.keys())
         if len(parameter_names) < 2:
             raise ValueError(
                 (
-                    f"Step function '{func.__name__}' must accept at least two arguments (state, batch)."
+                    f"Step function '{func_name}' must accept at least two arguments (state, batch)."
                 )
                 + " Fix: define the function as `def step(state: TrainState, batch: Mapping[str, Array], ...)`."
             )
@@ -190,7 +194,7 @@ def step_fn(
             except TypeError as exc:  # Missing required parameters
                 raise ValueError(
                     (
-                        f"Step function '{func.__name__}' must be called with arguments `(state, batch, ...)`."
+                        f"Step function '{func_name}' must be called with arguments `(state, batch, ...)`."
                     )
                     + f" Fix: {exc}."
                 ) from exc
@@ -200,7 +204,7 @@ def step_fn(
             ):
                 raise ValueError(
                     (
-                        f"Step function '{func.__name__}' must be called with positional arguments for state and batch."
+                        f"Step function '{func_name}' must be called with positional arguments for state and batch."
                     )
                     + " Fix: call it as `step(state, batch, ...)`."
                 )
@@ -208,25 +212,25 @@ def step_fn(
 
         def _validated_body(*args: Any, **kwargs: Any) -> StepOutput:
             state, batch = _extract_state_batch(*args, **kwargs)
-            _validate_train_state(state, func.__name__)
-            _validate_batch(batch, func.__name__)
+            _validate_train_state(state, func_name)
+            _validate_batch(batch, func_name)
 
             new_state, metrics = func(*args, **kwargs)
 
-            _validate_train_state(new_state, func.__name__)
-            metrics = _validate_metrics_tree(metrics, func.__name__)
+            _validate_train_state(new_state, func_name)
+            metrics = _validate_metrics_tree(metrics, func_name)
             return new_state, metrics
 
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> StepOutput:
             state, batch = _extract_state_batch(*args, **kwargs)
-            _validate_train_state(state, func.__name__)
-            _validate_batch(batch, func.__name__)
+            _validate_train_state(state, func_name)
+            _validate_batch(batch, func_name)
 
             new_state, metrics = func(*args, **kwargs)
 
-            _validate_train_state(new_state, func.__name__)
-            validated_metrics = _validate_metrics_host(metrics, func.__name__)
+            _validate_train_state(new_state, func_name)
+            validated_metrics = _validate_metrics_host(metrics, func_name)
             return new_state, validated_metrics
 
         # Store compilation parameters and validation metadata

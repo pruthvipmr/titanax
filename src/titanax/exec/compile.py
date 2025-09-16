@@ -8,7 +8,7 @@ pure data-parallel map style execution.
 from __future__ import annotations
 
 import functools
-from typing import Any, Optional
+from typing import Any, Optional, Callable, cast
 
 import jax
 
@@ -16,6 +16,17 @@ from ..compat import PartitionSpec, shard_map, pjit
 from ..exceptions import CompilationError
 from ..parallel.plan import Plan
 from ..types import StepFunction
+
+
+def _get_partition_spec_ctor() -> Callable[..., Any]:
+    """Return the PartitionSpec constructor, raising if unavailable."""
+
+    if PartitionSpec is None:
+        raise CompilationError(
+            "PartitionSpec is unavailable in this JAX version",
+            "Upgrade to a JAX release with sharding support or avoid compiling with sharding.",
+        )
+    return cast(Callable[..., Any], PartitionSpec)
 
 
 def _get_validated_function(step_fn: StepFunction) -> StepFunction:
@@ -31,14 +42,15 @@ def _get_validated_function(step_fn: StepFunction) -> StepFunction:
 def _infer_default_specs(plan: Plan, num_args: int) -> tuple[Any, ...]:
     """Infer default input shard specs based on the plan configuration."""
 
-    state_spec = PartitionSpec()
-    batch_spec = PartitionSpec()
+    spec_ctor = _get_partition_spec_ctor()
+    state_spec = spec_ctor()
+    batch_spec = spec_ctor()
     if plan.data_parallel is not None:
-        batch_spec = PartitionSpec(plan.data_parallel.axis)
+        batch_spec = spec_ctor(plan.data_parallel.axis)
 
     specs = [state_spec, batch_spec]
     # Any additional args (e.g. static configs) default to replicated specs.
-    specs.extend(PartitionSpec() for _ in range(max(0, num_args - 2)))
+    specs.extend(spec_ctor() for _ in range(max(0, num_args - 2)))
     return tuple(specs)
 
 
@@ -64,6 +76,21 @@ def compile_step_with_plan(
     parameter_names = getattr(step_fn, "_parameter_names", None)
     num_args = len(parameter_names) if parameter_names is not None else 2
 
+    mesh_devices = getattr(mesh, "devices", None)
+    mesh_size = getattr(mesh_devices, "size", None)
+
+    if mesh_size == 1:
+        @functools.wraps(body)
+        def single_device_fn(*args: Any, **kwargs: Any):
+            with mesh:
+                return body(*args, **kwargs)
+
+        return jax.jit(
+            single_device_fn,
+            donate_argnums=donate_argnums,
+            static_argnums=static_argnums,
+        )
+
     if in_shardings is not None or out_shardings is not None:
         if in_shardings is None or out_shardings is None:
             raise CompilationError(
@@ -71,8 +98,15 @@ def compile_step_with_plan(
                 "Pass both sharding arguments or omit them to use shard_map fallback.",
             )
 
+        pjit_fn = cast(Optional[Callable[..., Any]], pjit)
+        if pjit_fn is None:
+            raise CompilationError(
+                "pjit is unavailable in this JAX version",
+                "Upgrade to a JAX release that provides jax.pjit to use sharded execution.",
+            )
+
         try:
-            compiled = pjit(
+            compiled = pjit_fn(
                 body,
                 in_shardings=in_shardings,
                 out_shardings=out_shardings,
@@ -94,15 +128,23 @@ def compile_step_with_plan(
 
     in_specs = _infer_default_specs(plan, num_args)
 
-    state_out_spec = PartitionSpec()
+    spec_ctor = _get_partition_spec_ctor()
+    state_out_spec = spec_ctor()
+
+    shard_map_fn = cast(Optional[Callable[..., Any]], shard_map)
+    if shard_map_fn is None:
+        raise CompilationError(
+            "shard_map is unavailable in this JAX version",
+            "Upgrade to a JAX release with shard_map support or provide explicit sharding specs for pjit.",
+        )
 
     def shard_mapped(*args: Any, **kwargs: Any):
         with mesh:
-            mapped = shard_map(
+            mapped = shard_map_fn(
                 body,
                 mesh=mesh,
                 in_specs=in_specs,
-                out_specs=(state_out_spec, PartitionSpec()),
+                out_specs=(state_out_spec, spec_ctor()),
             )
             return mapped(*args, **kwargs)
 

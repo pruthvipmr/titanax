@@ -24,6 +24,7 @@ from ..types import (
     CheckpointStrategy,
     Params,
     OptState,
+    Mesh,
 )
 from ..runtime.mesh import MeshSpec
 from ..parallel.plan import Plan
@@ -231,7 +232,7 @@ class Engine:
         # Initialize compiled step function (will be set when step_fn is registered)
         self._compiled_step_fn: Optional[StepFunction] = None
 
-    def _validate_and_build_mesh(self) -> "Mesh":
+    def _validate_and_build_mesh(self) -> Mesh:
         """Validate and build the JAX mesh from specification."""
         try:
             mesh = self.mesh_spec.build()
