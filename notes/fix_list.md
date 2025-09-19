@@ -127,12 +127,12 @@ This document enumerates **all fixes, changes, and additions** to address before
 
 ## 5) Minimal TP & PP (practical stubs)
 
-- [ ] **TP demo (1D model parallel MLP)**
+- [x] **TP demo (1D model parallel MLP)**
   - **Where:** `examples/tp_minimal_mlp.py`
   - **Add:** Shard the MLP’s hidden dimension along `axis="model"`; run fwd+bwd on tiny data to verify numerics.
   - **DoD:** Script runs end‑to‑end on single host multi-device; asserts activation/grad shapes and a decreasing loss for 5 steps.
 
-- [ ] **PP demo (2‑stage encoder/decoder split)**
+- [x] **PP demo (2‑stage encoder/decoder split)**
   - **Where:** `examples/pp_minimal_two_stage.py`
   - **Add:** Two `Stage`s with a simple 1F1B scheduler; microbatching across the pipeline; CPU-friendly sizes.
   - **DoD:** Script executes for 4 global steps; activations moved only at boundaries; loss decreases.
