@@ -82,6 +82,20 @@ class BaseCheckpointStrategy:
         steps = self.list_available_steps()
         return steps[-1] if steps else None
 
+    def latest_step(self) -> int:
+        """Return the most recent checkpoint step number.
+
+        Raises:
+            CheckpointError: If no checkpoints are available
+        """
+        latest = self.get_latest_step()
+        if latest is None:
+            raise CheckpointError(
+                "No checkpoints available",
+                suggestion="Save a checkpoint before calling latest_step()",
+            )
+        return latest
+
     def cleanup_old_checkpoints(self, keep_last_n: int = 3) -> None:
         """Remove old checkpoints, keeping only the most recent N.
 
@@ -147,22 +161,15 @@ def resolve_checkpoint_step(
                     ),
                 )
             return step
-        else:
-            latest = strategy.get_latest_step()
-            if latest is None:
-                raise CheckpointError(
-                    "No checkpoints available for loading",
-                    suggestion="Save a checkpoint first or specify an existing checkpoint step",
-                )
-            return latest
-    else:
-        # For custom checkpoint strategies that don't inherit from BaseCheckpointStrategy
-        if step is None:
-            raise CheckpointError(
-                "Step must be specified for custom checkpoint strategies",
-                suggestion="Provide a specific step number for loading",
-            )
-        return step
+        return strategy.latest_step()
+
+    # For custom checkpoint strategies that don't inherit from BaseCheckpointStrategy
+    if step is None:
+        raise CheckpointError(
+            "Step must be specified for custom checkpoint strategies",
+            suggestion="Provide a specific step number for loading",
+        )
+    return step
 
 
 def validate_checkpoint_compatibility(

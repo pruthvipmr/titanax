@@ -1,313 +1,176 @@
-"""Orbax-based checkpoint implementation for Titanax.
+"""Orbax-based checkpoint strategy for Titanax."""
 
-This module provides an Orbax-based implementation of the CheckpointStrategy
-protocol, supporting sharded parameter save/load, TrainState serialization,
-and step-based checkpoint management.
-"""
+from __future__ import annotations
 
-import time
 import json
+import time
+from dataclasses import asdict
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Any, Dict
 
 import jax
-from orbax.checkpoint import PyTreeCheckpointer  # type: ignore
+from orbax.checkpoint import PyTreeCheckpointer  # type: ignore[import]
 
-from ..types import PyTree
 from ..exceptions import CheckpointError
+from ..types import PyTree
 from .checkpoint import (
     BaseCheckpointStrategy,
     CheckpointMetadata,
-    validate_checkpoint_compatibility,
+    resolve_checkpoint_step,
 )
 
-
-# Version info for metadata
 try:
     import titanax
 
     TITANAX_VERSION = getattr(titanax, "__version__", "dev")
-except ImportError:
+except ImportError:  # pragma: no cover - defensive guard for early bootstrapping
     TITANAX_VERSION = "dev"
 
 
 class OrbaxCheckpoint(BaseCheckpointStrategy):
-    """Orbax-based checkpoint strategy with sharding support.
+    """Persist Titanax `TrainState` objects using Orbax."""
 
-    This implementation uses Google's Orbax library for efficient checkpointing
-    of large, sharded models. It supports:
-    - Automatic sharded save/load
-    - Step-based checkpoint organization
-    - Metadata tracking and compatibility validation
-    - Checkpoint cleanup and management
-    """
-
-    def __init__(
-        self,
-        checkpoint_dir: str | Path,
-        save_interval_steps: int = 1000,
-        keep_checkpoints: int = 3,
-        async_save: bool = True,
-        validate_compatibility: bool = True,
-        mesh_spec: Optional[Dict[str, Any]] = None,
-        plan_spec: Optional[Dict[str, Any]] = None,
-    ):
-        """Initialize Orbax checkpoint strategy.
-
-        Args:
-            checkpoint_dir: Directory to store checkpoints
-            save_interval_steps: Steps between automatic saves (0 to disable)
-            keep_checkpoints: Number of recent checkpoints to keep (0 for unlimited)
-            async_save: Whether to save asynchronously
-            validate_compatibility: Whether to validate compatibility on load
-            mesh_spec: Current mesh specification for compatibility checking
-            plan_spec: Current plan specification for compatibility checking
-        """
+    def __init__(self, checkpoint_dir: str | Path, keep_n: int = 3) -> None:
         super().__init__(checkpoint_dir)
-
-        self.save_interval_steps = save_interval_steps
-        self.keep_checkpoints = keep_checkpoints
-        self.async_save = async_save
-        self.validate_compatibility = validate_compatibility
-        self.mesh_spec = mesh_spec
-        self.plan_spec = plan_spec
-
-        # Initialize Orbax checkpointer
-        try:
-            self.checkpointer = PyTreeCheckpointer()
-        except Exception as e:
+        if keep_n <= 0:
             raise CheckpointError(
-                f"Failed to initialize Orbax checkpointer: {e}",
-                suggestion="Ensure orbax-checkpoint is installed: pip install orbax-checkpoint",
-            ) from e
-
-        # Track last saved step for interval checking
-        self._last_saved_step = -1
-
-    def save(self, state: PyTree, step: int) -> None:
-        """Save training state to checkpoint.
-
-        Args:
-            state: Training state (typically TrainState)
-            step: Current training step
-
-        Raises:
-            CheckpointError: If save operation fails
-        """
-        # Check if we should save based on interval
-        if (
-            self.save_interval_steps > 0
-            and step - self._last_saved_step < self.save_interval_steps
-        ):
-            return
-
-        checkpoint_path = self.get_checkpoint_path(step)
-
+                "keep_n must be a positive integer",
+                suggestion="Pass keep_n >= 1 to retain at least one checkpoint",
+            )
+        self.keep_n = keep_n
         try:
-            # Prepare checkpoint data
-            checkpoint_data = {"state": state, "metadata": self._create_metadata(step)}
-
-            # Save with Orbax (simplified approach - Orbax handles async internally)
-            self.checkpointer.save(checkpoint_path / "checkpoint", checkpoint_data)
-
-            # Save human-readable metadata
-            self._save_metadata_json(checkpoint_path, checkpoint_data["metadata"])
-
-            self._last_saved_step = step
-
-            # Cleanup old checkpoints if requested
-            if self.keep_checkpoints > 0:
-                self.cleanup_old_checkpoints(self.keep_checkpoints)
-
-        except Exception as e:
+            self._checkpointer = PyTreeCheckpointer()
+        except Exception as exc:  # pragma: no cover - falls back to suggestion
             raise CheckpointError(
-                f"Failed to save checkpoint at step {step}: {e}",
-                suggestion="Check disk space and permissions for checkpoint directory",
-            ) from e
+                f"Failed to initialize Orbax checkpointer: {exc}",
+                suggestion="Install orbax-checkpoint and ensure it matches the JAX version",
+            ) from exc
 
-    def load(self, step: Optional[int] = None) -> PyTree:
-        """Load training state from checkpoint.
+    # ---------------------------------------------------------------------
+    # Public API
+    # ---------------------------------------------------------------------
+    def save(self, state: PyTree) -> None:
+        """Save a `TrainState`-compatible PyTree.
 
-        Args:
-            step: Specific step to load, or None for latest
-
-        Returns:
-            Loaded training state
-
-        Raises:
-            CheckpointError: If load operation fails
+        The current step is derived from the state's `step` attribute and used
+        to generate a monotonic directory name (e.g., `step_00000042`).
         """
-        from .checkpoint import resolve_checkpoint_step
-
-        try:
-            resolved_step = resolve_checkpoint_step(self, step)
-            checkpoint_path = self.get_checkpoint_path(resolved_step)
-
-            # Load checkpoint data
-            checkpoint_data = self.checkpointer.restore(checkpoint_path / "checkpoint")
-
-            # Validate compatibility if enabled
-            if self.validate_compatibility and "metadata" in checkpoint_data:
-                metadata = checkpoint_data["metadata"]
-                if isinstance(metadata, dict):
-                    checkpoint_metadata = CheckpointMetadata(**metadata)
-                    validate_checkpoint_compatibility(
-                        checkpoint_metadata,
-                        self.mesh_spec,
-                        self.plan_spec,
-                        strict=False,  # Allow resharding by default
-                    )
-
-            return checkpoint_data["state"]
-
-        except CheckpointError:
-            raise
-        except Exception as e:
-            available_steps = self.list_available_steps()
+        step = getattr(state, "step", None)
+        if step is None:
             raise CheckpointError(
-                f"Failed to load checkpoint: {e}",
-                suggestion=(
-                    f"Available steps: {available_steps}"
-                    if available_steps
-                    else "No checkpoints available"
-                ),
-            ) from e
-
-    def restore(self, state: PyTree, step: Optional[int] = None) -> PyTree:
-        """Restore training state from checkpoint (alias for load).
-
-        This method provides the same functionality as load() but matches
-        the CheckpointStrategy protocol naming convention.
-
-        Args:
-            state: Unused (kept for protocol compatibility)
-            step: Specific step to restore, or None for latest
-
-        Returns:
-            Restored training state
-        """
-        return self.load(step)
-
-    def should_save(self, step: int) -> bool:
-        """Check if checkpoint should be saved at this step.
-
-        Args:
-            step: Current training step
-
-        Returns:
-            True if checkpoint should be saved
-        """
-        if self.save_interval_steps <= 0:
-            return False
-        # Always save if no previous save (handle initial case)
-        if self._last_saved_step == -1:
-            return True
-        return step - self._last_saved_step >= self.save_interval_steps
-
-    def get_metadata(self, step: Optional[int] = None) -> CheckpointMetadata:
-        """Get metadata for a checkpoint.
-
-        Args:
-            step: Specific step, or None for latest
-
-        Returns:
-            Checkpoint metadata
-
-        Raises:
-            CheckpointError: If metadata cannot be loaded
-        """
-        from .checkpoint import resolve_checkpoint_step
-
-        try:
-            resolved_step = resolve_checkpoint_step(self, step)
-            checkpoint_path = self.get_checkpoint_path(resolved_step)
-
-            # Try to load from JSON first (human-readable)
-            metadata_json_path = checkpoint_path / "metadata.json"
-            if metadata_json_path.exists():
-                with open(metadata_json_path, "r") as f:
-                    metadata_dict = json.load(f)
-                    return CheckpointMetadata(**metadata_dict)
-
-            # Fall back to loading from checkpoint
-            checkpoint_data = self.checkpointer.restore(checkpoint_path / "checkpoint")
-            if "metadata" in checkpoint_data:
-                return CheckpointMetadata(**checkpoint_data["metadata"])
-
-            # No metadata available
+                "State object is missing a 'step' attribute",
+                suggestion="Ensure the Engine passes a TrainState with a numeric step",
+            )
+        if not isinstance(step, int):
             raise CheckpointError(
-                f"No metadata found for checkpoint step {resolved_step}",
-                suggestion="This may be an old checkpoint format",
+                "State.step must be an integer",
+                suggestion="Cast the step to int before saving",
             )
 
-        except CheckpointError:
-            raise
-        except Exception as e:
-            raise CheckpointError(
-                f"Failed to load checkpoint metadata: {e}",
-                suggestion="Check if checkpoint directory is accessible",
-            ) from e
+        checkpoint_path = self.get_checkpoint_path(step)
+        checkpoint_path.mkdir(parents=True, exist_ok=True)
 
-    def _create_metadata(self, step: int) -> Dict[str, Any]:
-        """Create metadata for checkpoint.
-
-        Args:
-            step: Training step
-
-        Returns:
-            Metadata dictionary
-        """
-        return {
-            "step": step,
-            "timestamp": time.time(),
-            "titanax_version": TITANAX_VERSION,
-            "jax_version": jax.__version__,
-            "mesh_spec": self.mesh_spec,
-            "plan_spec": self.plan_spec,
-            "extra": {
-                "save_interval_steps": self.save_interval_steps,
-                "async_save": self.async_save,
-            },
-        }
-
-    def _save_metadata_json(
-        self, checkpoint_path: Path, metadata: Dict[str, Any]
-    ) -> None:
-        """Save metadata as human-readable JSON.
-
-        Args:
-            checkpoint_path: Path to checkpoint directory
-            metadata: Metadata dictionary
-        """
+        state_dir = checkpoint_path / "state"
         try:
-            metadata_path = checkpoint_path / "metadata.json"
-            with open(metadata_path, "w") as f:
-                json.dump(metadata, f, indent=2, default=str)
+            metadata = self._build_metadata(step)
+            self._checkpointer.save(state_dir.as_posix(), state, force=True)
+            self._write_metadata(checkpoint_path, metadata)
+            self.cleanup_old_checkpoints(self.keep_n)
+        except Exception as exc:
+            raise CheckpointError(
+                f"Failed to save checkpoint for step {step}: {exc}",
+                suggestion="Verify filesystem permissions and available disk space",
+            ) from exc
+
+    def restore(self, step: int | None = None) -> PyTree:
+        """Restore a checkpoint, defaulting to the latest available step."""
+        resolved_step = resolve_checkpoint_step(self, step)
+        state_dir = self.get_checkpoint_path(resolved_step) / "state"
+        try:
+            state = self._checkpointer.restore(state_dir.as_posix())
+        except Exception as exc:
+            available = self.list_available_steps()
+            raise CheckpointError(
+                f"Failed to restore checkpoint for step {resolved_step}: {exc}",
+                suggestion=(
+                    f"Available steps: {available}"
+                    if available
+                    else "No checkpoints saved yet"
+                ),
+            ) from exc
+
+        metadata = self._read_metadata(self.get_checkpoint_path(resolved_step))
+
+        if not hasattr(state, "step"):
+            # The checkpointer may return the flattened children when the original
+            # dataclass type is not reconstructed automatically. Rehydrate using
+            # the registered PyTree helpers.
+            try:
+                from ..exec.engine import TrainState  # Local import to avoid cycles
+
+                step_value = metadata.step if metadata is not None else resolved_step
+                state = TrainState.tree_unflatten((step_value, None), tuple(state))
+            except Exception as exc:
+                raise CheckpointError(
+                    f"Failed to reconstruct TrainState: {exc}",
+                    suggestion="Ensure the checkpoint was created with a compatible Titanax version",
+                ) from exc
+
+        if getattr(state, "step", resolved_step) != resolved_step:
+            # Keep metadata consistent for downstream logging.
+            replace = getattr(state, "replace", None)
+            if callable(replace):
+                state = replace(step=resolved_step)
+        return state
+
+    def latest_step(self) -> int:
+        """Return the most recent checkpoint step."""
+        return super().latest_step()
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+    def _build_metadata(self, step: int) -> CheckpointMetadata:
+        return CheckpointMetadata(
+            step=step,
+            timestamp=time.time(),
+            titanax_version=TITANAX_VERSION,
+            jax_version=jax.__version__,
+            mesh_spec=None,
+            plan_spec=None,
+            extra={"keep_n": self.keep_n},
+        )
+
+    def _write_metadata(self, path: Path, metadata: CheckpointMetadata) -> None:
+        metadata_path = path / "metadata.json"
+        with open(metadata_path, "w", encoding="utf-8") as fh:
+            json.dump(self._metadata_to_dict(metadata), fh, indent=2)
+
+    def _read_metadata(self, path: Path) -> CheckpointMetadata | None:
+        metadata_path = path / "metadata.json"
+        if not metadata_path.exists():
+            return None
+        try:
+            with open(metadata_path, "r", encoding="utf-8") as fh:
+                data: Dict[str, Any] = json.load(fh)
+            return CheckpointMetadata(**data)
         except Exception:
-            # Non-critical operation, don't fail the entire save
-            pass
+            return None
+
+    @staticmethod
+    def _metadata_to_dict(metadata: CheckpointMetadata) -> Dict[str, Any]:
+        metadata_dict = asdict(metadata)
+        # Drop None fields for brevity.
+        return {k: v for k, v in metadata_dict.items() if v is not None}
 
 
 def create_checkpoint_strategy(
-    checkpoint_dir: str | Path, strategy: str = "orbax", **kwargs
+    checkpoint_dir: str | Path, strategy: str = "orbax", **kwargs: Any
 ) -> BaseCheckpointStrategy:
-    """Factory function to create checkpoint strategies.
-
-    Args:
-        checkpoint_dir: Directory for checkpoints
-        strategy: Strategy type ("orbax" supported)
-        **kwargs: Additional arguments for strategy
-
-    Returns:
-        Checkpoint strategy instance
-
-    Raises:
-        CheckpointError: If strategy is not supported
-    """
+    """Factory for checkpoint strategies."""
     if strategy.lower() == "orbax":
         return OrbaxCheckpoint(checkpoint_dir, **kwargs)
-    else:
-        raise CheckpointError(
-            f"Unsupported checkpoint strategy: {strategy}",
-            suggestion="Supported strategies: 'orbax'",
-        )
+    raise CheckpointError(
+        f"Unsupported checkpoint strategy: {strategy}",
+        suggestion="Use 'orbax' for Orbax-based checkpoints",
+    )

@@ -98,16 +98,16 @@ class Logger(Protocol):
 
 @runtime_checkable
 class CheckpointStrategy(Protocol):
-    """Protocol for checkpoint implementations."""
+    """Protocol describing Titanax checkpoint implementations."""
 
-    def save(self, state: PyTree, step: int) -> None:
-        """Save training state to checkpoint."""
+    def save(self, state: PyTree) -> None:
+        """Persist a training state checkpoint."""
         ...
 
-    def load(self, step: int | None = None) -> PyTree:
-        """Load training state from checkpoint."""
+    def restore(self, step: int | None = None) -> PyTree:
+        """Load a training state checkpoint, defaulting to the latest."""
         ...
 
-    def restore(self, state: PyTree, step: int | None = None) -> PyTree:
-        """Restore training state from checkpoint."""
+    def latest_step(self) -> int:
+        """Return the most recent checkpoint step number."""
         ...

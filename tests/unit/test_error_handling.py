@@ -229,8 +229,11 @@ class TestErrorHandling:
             len(interrupt_calls) > 0
         ), f"Expected interrupted log, got calls: {logger.log_scalar.call_args_list}"
 
-        # Check that checkpoint was saved
-        checkpoint.save.assert_called_with(initial_state, 5)
+        # Check that checkpoint was saved with optimizer attached
+        assert checkpoint.save.call_count >= 1
+        saved_state = checkpoint.save.call_args[0][0]
+        assert saved_state.step == initial_state.step
+        assert getattr(saved_state, "_optimizer", None) is self.optimizer
 
 
 if __name__ == "__main__":

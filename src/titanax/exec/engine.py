@@ -5,7 +5,8 @@ for managing training loops with explicit parallelization.
 """
 
 import dataclasses
-from typing import Dict, List, Optional, Iterable, TYPE_CHECKING
+from pathlib import Path
+from typing import Dict, Iterable, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..optim.optax_adapter import OptaxAdapter
@@ -28,7 +29,7 @@ from ..types import (
 )
 from ..runtime.mesh import MeshSpec
 from ..parallel.plan import Plan
-from ..exceptions import EngineError
+from ..exceptions import CheckpointError, EngineError
 from .collectives import set_current_mesh
 from .step_fn import update_rngs
 from .compile import compile_step_with_plan
@@ -202,6 +203,7 @@ class Engine:
         precision: Precision policy configuration
         checkpoint: Checkpoint strategy for save/load operations
         loggers: List of logger instances for metrics
+        checkpoint_interval: Save checkpoint every N steps (None disables periodic saves)
     """
 
     def __init__(
@@ -212,6 +214,7 @@ class Engine:
         precision: Precision = Precision(),
         checkpoint: Optional[CheckpointStrategy] = None,
         loggers: Optional[List[Logger]] = None,
+        checkpoint_interval: int | None = 1000,
     ):
         self.mesh_spec = mesh
         self.plan = plan
@@ -219,6 +222,12 @@ class Engine:
         self.precision = precision
         self.checkpoint = checkpoint
         self.loggers = loggers or []
+        if checkpoint_interval is not None and checkpoint_interval <= 0:
+            raise EngineError(
+                "checkpoint_interval must be positive when provided",
+                suggestion="Provide checkpoint_interval=None to disable periodic saves or a positive integer",
+            )
+        self.checkpoint_interval = checkpoint_interval
 
         # Build and validate the mesh
         self._mesh = self._validate_and_build_mesh()
@@ -350,22 +359,71 @@ class Engine:
         # Execute the step
         return self._execute_step(state, batch)
 
-    def save_checkpoint(self, state: TrainState, step: Optional[int] = None) -> None:
-        """Save training state to checkpoint.
-
-        Args:
-            state: Training state to save
-            step: Optional step number (uses state.step if None)
-        """
+    def save_checkpoint(self, state: TrainState) -> None:
+        """Persist the provided training state using the configured checkpoint."""
         if self.checkpoint is None:
             raise EngineError(
                 "No checkpoint strategy configured",
                 suggestion="Configure checkpoint strategy in Engine constructor",
             )
 
-        step_number = step if step is not None else state.step
-        self.checkpoint.save(state, step_number)
-        self._log_scalar("checkpoint/saved_step", float(step_number), step_number)
+        self._save_checkpoint(state, tag="manual", force=True)
+
+    def _save_checkpoint(self, state: TrainState, *, tag: str, force: bool) -> None:
+        """Internal helper for checkpoint persistence with logging."""
+        if self.checkpoint is None:
+            return
+
+        if not isinstance(getattr(state, "step", None), int):
+            raise EngineError(
+                "State.step must be an integer before checkpointing",
+                suggestion="Ensure the TrainState.step field is an int",
+            )
+
+        if not force:
+            if self.checkpoint_interval is None:
+                return
+            if state.step % self.checkpoint_interval != 0:
+                return
+
+        state_to_save = state
+        if hasattr(state, "replace") and getattr(state, "_optimizer", None) is None:
+            state_to_save = state.replace(_optimizer=self.optimizer)
+
+        try:
+            self.checkpoint.save(state_to_save)
+        except CheckpointError as err:
+            raise EngineError(
+                f"Failed to save checkpoint at step {state.step}: {err}",
+                suggestion="Verify checkpoint backend configuration and disk permissions",
+            ) from err
+
+        self._log_scalar(f"checkpoint/{tag}", float(state.step), state.step)
+
+    def _rehydrate_restored_state(
+        self, state: TrainState | PyTree
+    ) -> TrainState | PyTree:
+        """Rehydrate optimizer state after loading raw checkpoint data."""
+        if not isinstance(state, TrainState):
+            return state
+
+        if self.optimizer is None:
+            return state
+
+        try:
+            reference_opt_state = self.optimizer.init(state.params)
+        except Exception:
+            return state
+
+        try:
+            ref_leaves, ref_treedef = tree_util.tree_flatten(reference_opt_state)
+            saved_leaves, _ = tree_util.tree_flatten(state.opt_state)
+            if len(ref_leaves) != len(saved_leaves):
+                return state
+            restored_opt_state = tree_util.tree_unflatten(ref_treedef, saved_leaves)
+            return state.replace(opt_state=restored_opt_state)
+        except Exception:
+            return state
 
     def load_checkpoint(self, step: Optional[int] = None) -> TrainState:
         """Load training state from checkpoint.
@@ -382,7 +440,7 @@ class Engine:
                 suggestion="Configure checkpoint strategy in Engine constructor",
             )
 
-        state = self.checkpoint.load(step)
+        state = self._rehydrate_restored_state(self.checkpoint.restore(step))
 
         # Ensure state is a TrainState with proper attributes
         if not hasattr(state, "step"):
@@ -390,6 +448,9 @@ class Engine:
                 f"Loaded checkpoint is not a valid TrainState: {type(state)}",
                 suggestion="Check checkpoint format and ensure it was saved with current Titanax version",
             )
+
+        if hasattr(state, "replace"):
+            state = state.replace(_optimizer=self.optimizer)
 
         self._log_scalar("checkpoint/loaded_step", float(state.step), state.step)
         return state
@@ -401,6 +462,7 @@ class Engine:
         steps: Optional[int] = None,
         state: Optional[TrainState] = None,
         continue_on_error: bool = False,
+        resume_from: int | str | Path | None = None,
     ) -> TrainState:
         """Run the training loop.
 
@@ -408,9 +470,10 @@ class Engine:
             step_fn: The step function to execute each training step
             data: Iterable of training data batches
             steps: Maximum number of steps to train (None for unlimited)
-            state: Initial training state (None to create from checkpoint or error)
+            state: Initial training state (None to restore from checkpoint)
             continue_on_error: If False (default), re-raise exceptions after logging.
                              If True, continue training after logging errors.
+            resume_from: Step number or checkpoint directory path to resume from
 
         Returns:
             Final training state after training
@@ -418,29 +481,64 @@ class Engine:
         if self._compiled_step_fn is None:
             self.register_step_fn(step_fn)
 
-        if state is None:
-            if self.checkpoint is not None:
-                try:
-                    state = self.checkpoint.load()
-                    self._log_scalar(
-                        "checkpoint/loaded_step", float(state.step), state.step
-                    )
-                except Exception:
-                    # No checkpoint available or failed to load
-                    raise EngineError(
-                        "No initial state provided and no checkpoint available",
-                        suggestion="Either provide state parameter or ensure checkpoint can be loaded",
-                    )
-            else:
+        run_state = state
+        if run_state is None:
+            if self.checkpoint is None:
                 raise EngineError(
                     "No initial state provided and no checkpoint strategy configured",
                     suggestion="Either provide state parameter or configure checkpoint strategy",
                 )
 
+            resume_step: Optional[int] = None
+            if resume_from is not None:
+                if isinstance(resume_from, int):
+                    resume_step = resume_from
+                elif isinstance(resume_from, (str, Path)):
+                    resume_path = Path(resume_from)
+                    checkpoint_dir = getattr(self.checkpoint, "checkpoint_dir", None)
+                    if (
+                        checkpoint_dir is not None
+                        and Path(checkpoint_dir) != resume_path
+                    ):
+                        raise EngineError(
+                            "resume_from path does not match configured checkpoint directory",
+                            suggestion="Instantiate the Engine checkpoint with the same directory",
+                        )
+                else:
+                    raise EngineError(
+                        f"Unsupported resume_from value: {resume_from}",
+                        suggestion="Provide an integer step or a checkpoint directory path",
+                    )
+
+            try:
+                restored_state = self._rehydrate_restored_state(
+                    self.checkpoint.restore(resume_step)
+                )
+            except CheckpointError as err:
+                raise EngineError(
+                    f"Failed to restore checkpoint: {err}",
+                    suggestion="Ensure checkpoints exist or provide an explicit initial state",
+                ) from err
+
+            if hasattr(restored_state, "replace"):
+                run_state = restored_state.replace(_optimizer=self.optimizer)
+            else:
+                run_state = restored_state
+
+            self._log_scalar(
+                "checkpoint/loaded_step",
+                float(getattr(run_state, "step", 0)),
+                getattr(run_state, "step", 0),
+            )
+        else:
+            if hasattr(run_state, "replace"):
+                run_state = run_state.replace(_optimizer=self.optimizer)
+
         # Ensure mesh context is available for thread-local access
         set_current_mesh(self._mesh)
 
         current_step = 0
+        self._save_checkpoint(run_state, tag="start", force=True)
         try:
             for batch in data:
                 if steps is not None and current_step >= steps:
@@ -448,26 +546,22 @@ class Engine:
 
                 try:
                     # Execute one training step
-                    state, metrics = self._execute_step(state, batch)
+                    run_state, metrics = self._execute_step(run_state, batch)
                     current_step += 1
 
                     # Log metrics
-                    self._log_metrics(metrics, state.step)
+                    self._log_metrics(metrics, run_state.step)
 
-                    # Save checkpoint periodically (simplified logic)
-                    if self.checkpoint is not None and state.step % 1000 == 0:
-                        self.checkpoint.save(state, state.step)
-                        self._log_scalar(
-                            "checkpoint/saved_step", float(state.step), state.step
-                        )
+                    # Save checkpoint periodically
+                    self._save_checkpoint(run_state, tag="periodic", force=False)
 
                 except Exception as step_error:
                     # Log the error first
                     error_msg = (
-                        f"Step execution failed at step {state.step}: {step_error}"
+                        f"Step execution failed at step {run_state.step}: {step_error}"
                     )
                     self._log_scalar(
-                        "training/step_error", float(state.step), state.step
+                        "training/step_error", float(run_state.step), run_state.step
                     )
                     print(f"ERROR: {error_msg}")
 
@@ -477,24 +571,22 @@ class Engine:
                     else:
                         # Continue training, but skip this step
                         print(
-                            f"WARNING: Continuing training despite error at step {state.step}"
+                            f"WARNING: Continuing training despite error at step {run_state.step}"
                         )
                         current_step += 1
                         continue
 
         except KeyboardInterrupt:
-            self._log_scalar("training/interrupted", float(state.step), state.step)
-            if self.checkpoint is not None:
-                self.checkpoint.save(state, state.step)
-                self._log_scalar("checkpoint/saved_step", float(state.step), state.step)
+            self._log_scalar(
+                "training/interrupted", float(run_state.step), run_state.step
+            )
+            self._save_checkpoint(run_state, tag="shutdown", force=True)
             raise
 
         # Final checkpoint save
-        if self.checkpoint is not None:
-            self.checkpoint.save(state, state.step)
-            self._log_scalar("checkpoint/final_step", float(state.step), state.step)
+        self._save_checkpoint(run_state, tag="final", force=True)
 
-        return state
+        return run_state
 
     def _get_batch_axis(self) -> str:
         """Get the batch axis name for PRNG key updates.
@@ -700,4 +792,11 @@ class Engine:
             f"  Checkpoint: {'enabled' if self.checkpoint else 'disabled'}",
             f"  Loggers: {len(self.loggers)} configured",
         ]
+        if self.checkpoint is not None:
+            interval = (
+                f"every {self.checkpoint_interval} steps"
+                if self.checkpoint_interval is not None
+                else "disabled"
+            )
+            lines.append(f"  Checkpoint interval: {interval}")
         return "\n".join(lines)

@@ -141,15 +141,15 @@ This document enumerates **all fixes, changes, and additions** to address before
 
 ## 6) Checkpointing (Orbax strategy)
 
-- [ ] **Checkpoint strategy implementation**
-  - **Where:** `titanax/io/orbax.py`
-  - **Add:** `OrbaxCheckpoint(path, keep_n=3)` implementing `save(state)`, `restore() -> TrainState`, `latest_step() -> int`.
+- [x] **Checkpoint strategy implementation**
+  - **Where:** `titanax/io/orbax_io.py`
+  - **Add:** `OrbaxCheckpoint(path, keep_n=3)` implementing `save(state)`, `restore() -> TrainState`, `latest_step() -> int` with metadata sidecar and TrainState rehydration.
   - **DoD:** Unit test: round-trip a tiny `TrainState` on CPU, verify params and opt state equality; retention policy enforced.
 
-- [ ] **Engine integration**
+- [x] **Engine integration**
   - **Where:** `titanax/exec/engine.py`
-  - **Add:** Hooks: save on start, every `N` steps, and on graceful shutdown; include optimizer & RNGs in state.
-  - **DoD:** E2E test: training loop writes checkpoints; `resume_from=path` continues the same global step count.
+  - **Add:** Hooks: save on start, periodic via `checkpoint_interval`, graceful shutdown, and optimizer/RNG restoration through `_rehydrate_restored_state`.
+  - **DoD:** E2E tests: MNIST checkpoint/resume flows and fit `resume_from=path` continue the same global step count.
 
 ---
 

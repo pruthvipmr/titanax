@@ -250,7 +250,8 @@ def test_checkpoint_save_resume():
             plan=plan,
             optimizer=tx.optim.adamw(3e-4),
             precision=tx.Precision(),
-            checkpoint=tx.OrbaxCheckpoint(checkpoint_path, save_interval_steps=3),
+            checkpoint=tx.OrbaxCheckpoint(checkpoint_path),
+            checkpoint_interval=3,
             loggers=[tx.logging.CompactBasic()],
         )
 
@@ -268,7 +269,7 @@ def test_checkpoint_save_resume():
             intermediate_losses.append(float(metrics["loss"]))
 
         # Save checkpoint
-        engine1.checkpoint.save(state1, step=4)
+        engine1.checkpoint.save(state1)
         checkpoint_params = jax.tree.map(lambda x: x.copy(), state1.params)
 
         # Continue training to get different final state
@@ -284,12 +285,13 @@ def test_checkpoint_save_resume():
             optimizer=tx.optim.adamw(3e-4),
             precision=tx.Precision(),
             checkpoint=tx.OrbaxCheckpoint(checkpoint_path),
+            checkpoint_interval=3,
             loggers=[tx.logging.CompactBasic()],
         )
 
         # Load from checkpoint
         try:
-            state2 = engine2.checkpoint.load()
+            state2 = engine2.load_checkpoint()
             print(f"Successfully loaded checkpoint: step={state2.step}")
         except Exception as e:
             print(f"Checkpoint load failed: {e}")
@@ -458,6 +460,55 @@ if __name__ == "__main__":
 
     print("\n3. Testing checkpoint save/resume...")
     test_checkpoint_save_resume()
+
+
+@pytest.mark.integration
+def test_engine_fit_resume_from_checkpoint(tmp_path):
+    """End-to-end checkpoint resume using Engine.fit with resume_from path."""
+
+    mesh = tx.MeshSpec(devices="all", axes=("data",))
+    plan = tx.Plan(data_parallel=tx.DP(axis="data"))
+    checkpoint_dir = tmp_path / "ckpts"
+
+    engine = tx.Engine(
+        mesh=mesh,
+        plan=plan,
+        optimizer=tx.optim.sgd(1e-3),
+        checkpoint=tx.OrbaxCheckpoint(checkpoint_dir),
+        checkpoint_interval=1,
+    )
+
+    params = {"weight": jnp.ones((2, 2))}
+    initial_state = engine.create_state(params, {"train": jax.random.PRNGKey(0)})
+
+    @tx.step_fn
+    def simple_step(state, _batch):
+        state = state.replace(step=state.step + 1)
+        return state, {"loss": jnp.float32(state.step)}
+
+    data = [{} for _ in range(5)]
+
+    first_run = engine.fit(simple_step, data=data, steps=3, state=initial_state)
+    assert first_run.step == 3
+
+    resume_engine = tx.Engine(
+        mesh=mesh,
+        plan=plan,
+        optimizer=tx.optim.sgd(1e-3),
+        checkpoint=tx.OrbaxCheckpoint(checkpoint_dir),
+        checkpoint_interval=1,
+    )
+
+    resume_data = [{} for _ in range(5)]
+    resumed_state = resume_engine.fit(
+        simple_step,
+        data=resume_data,
+        steps=2,
+        resume_from=checkpoint_dir,
+    )
+
+    assert resumed_state.step == 5
+    assert resume_engine.checkpoint.latest_step() == 5
     print("✅ Checkpoint save/resume test passed")
 
     print("\n4. Testing microbatch equivalence...")

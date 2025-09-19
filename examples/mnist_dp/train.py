@@ -253,8 +253,10 @@ def main():
 
     # Setup checkpoint (optional)
     checkpoint = None
+    checkpoint_interval = None
     if args.checkpoint_dir:
-        checkpoint = tx.OrbaxCheckpoint(args.checkpoint_dir, save_every=200)
+        checkpoint_interval = 200
+        checkpoint = tx.OrbaxCheckpoint(args.checkpoint_dir)
 
     # Setup logging
     loggers = [tx.loggers.Basic()]
@@ -266,6 +268,7 @@ def main():
         optimizer=optimizer,
         precision=precision,
         checkpoint=checkpoint,
+        checkpoint_interval=checkpoint_interval,
         loggers=loggers,
     )
 
@@ -338,8 +341,8 @@ def main():
                 logger.log_dict(eval_metrics, step)
 
         # Checkpoint saving
-        if checkpoint and step % 200 == 0:
-            checkpoint.save(state, step)
+        if checkpoint and checkpoint_interval and step % checkpoint_interval == 0:
+            checkpoint.save(state)
 
     print("Training completed!")
 

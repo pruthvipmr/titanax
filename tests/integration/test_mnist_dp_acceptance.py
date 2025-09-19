@@ -210,7 +210,8 @@ def test_mnist_checkpoint_resume():
             plan=plan,
             optimizer=tx.optim.adamw(3e-4),
             precision=tx.Precision(),
-            checkpoint=tx.OrbaxCheckpoint(checkpoint_path, save_interval_steps=3),
+            checkpoint=tx.OrbaxCheckpoint(checkpoint_path),
+            checkpoint_interval=3,
             loggers=[tx.logging.CompactBasic()],
         )
 
@@ -237,7 +238,7 @@ def test_mnist_checkpoint_resume():
             state1, _ = engine1.step(state1, batch)
 
         # Save checkpoint manually
-        engine1.save_checkpoint(state1, step=6)
+        engine1.save_checkpoint(state1)
         checkpoint_params = state1.params.copy()
 
         # Second training session - resume from checkpoint
@@ -247,6 +248,7 @@ def test_mnist_checkpoint_resume():
             optimizer=tx.optim.adamw(3e-4),
             precision=tx.Precision(),
             checkpoint=tx.OrbaxCheckpoint(checkpoint_path),
+            checkpoint_interval=3,
             loggers=[tx.logging.CompactBasic()],
         )
 
@@ -264,8 +266,8 @@ def test_mnist_checkpoint_resume():
 
         # Verify state was restored correctly
         def tree_allclose(tree1, tree2, rtol=1e-5):
-            leaves1 = jax.tree_leaves(tree1)
-            leaves2 = jax.tree_leaves(tree2)
+            leaves1 = jax.tree.leaves(tree1)
+            leaves2 = jax.tree.leaves(tree2)
             return all(
                 jnp.allclose(l1, l2, rtol=rtol) for l1, l2 in zip(leaves1, leaves2)
             )

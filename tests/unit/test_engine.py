@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 from src.titanax.exec import Engine, Precision, TrainState, step_fn
 from src.titanax.runtime import MeshSpec
 from src.titanax.parallel import Plan, DP
-from src.titanax.exceptions import EngineError
+from src.titanax.exceptions import CheckpointError, EngineError
 
 
 class TestPrecision:
@@ -212,23 +212,30 @@ class MockCheckpoint:
     """Mock checkpoint strategy for testing."""
 
     def __init__(self):
-        self.saved_states = {}
+        self.saved_states: dict[int, TrainState] = {}
         self.load_should_fail = False
 
-    def save(self, state, step: int) -> None:
-        self.saved_states[step] = state
+    def save(self, state: TrainState) -> None:
+        self.saved_states[state.step] = state
 
-    def load(self, step=None):
+    def restore(self, step: int | None = None) -> TrainState:
         if self.load_should_fail:
-            raise Exception("Checkpoint load failed")
+            raise CheckpointError("Checkpoint load failed")
         if not self.saved_states:
-            raise Exception("No checkpoint available")
-        # Return the latest checkpoint
+            raise CheckpointError("No checkpoint available")
+
+        if step is not None:
+            if step not in self.saved_states:
+                raise CheckpointError("Requested step missing")
+            return self.saved_states[step]
+
         latest_step = max(self.saved_states.keys())
         return self.saved_states[latest_step]
 
-    def restore(self, state, step=None):
-        return self.load(step)
+    def latest_step(self) -> int:
+        if not self.saved_states:
+            raise CheckpointError("No checkpoint available")
+        return max(self.saved_states.keys())
 
 
 class TestEngine:
@@ -365,7 +372,7 @@ class TestEngine:
 
         data = [{"x": jnp.ones((1, 2))}]
 
-        with pytest.raises(EngineError, match="No initial state provided"):
+        with pytest.raises(EngineError, match="Failed to restore checkpoint"):
             engine.fit(step, data)
 
     def test_fit_with_provided_state(self):
