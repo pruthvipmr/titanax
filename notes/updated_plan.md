@@ -21,9 +21,9 @@ This plan reflects the current codebase after P0 completion and adjusts Phases P
 - ✅ Completed: implemented path enumeration, rule matching, spec tree construction, and activated unit coverage in `tests/unit/test_sharding_utils.py`.
 
 ### P1.2 NamedSharding Application Helpers
-- Implement `apply_named_sharding(tree, mesh, spec_tree)` using `NamedSharding(mesh, spec)` and `jax.device_put`.
-- Implement `shard_batch_specs(batch_example) -> spec_tree` that returns DP defaults (replicated or `PartitionSpec(dp_axis, ...)` for leading batch dim).
-- Tests: placement correctness and shape/sharding assertions on small trees.
+- ✅ Implemented `apply_named_sharding(tree, mesh, spec_tree)` with structure validation, `NamedSharding(mesh, spec)`, and Titanax `ShardingError` wrapping.
+- ✅ Implemented `shard_batch_specs(batch_example, dp_axis)` to shard the leading batch dimension by the DP axis and replicate metadata/scalars.
+- ✅ Added unit tests covering placement correctness, structure-mismatch errors, non-array safeguards, and batch spec defaults; ensured public `titanax.*` imports remain usable.
 
 ### P1.3 Compile/Engine Integration for TP
 - Extend `exec/compile.compile_step_with_plan` to accept optional `param_spec_tree` and `batch_spec_tree` to build pjit `in_shardings`/`out_shardings` automatically when Plan has TP.

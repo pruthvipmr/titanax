@@ -4,10 +4,14 @@ import pytest
 
 pytest.importorskip("jax")
 
-from titanax.exceptions import ShardingError
-from titanax.types import PartitionSpec
+import jax
+import jax.numpy as jnp
 
-import src.titanax.parallel.sharding as sharding
+from titanax.exceptions import ShardingError
+from titanax.runtime.mesh import MeshSpec
+from titanax.types import NamedSharding, PartitionSpec
+
+import titanax.parallel.sharding as sharding
 
 
 @pytest.fixture
@@ -116,13 +120,85 @@ class TestBuildParamSpecs:
         assert spec_tree["head"][0] == default_spec
 
 
-@pytest.mark.skip(reason="P1.2 pending")
 class TestNamedSharding:
-    def test_apply_named_sharding_placeholder(self) -> None:
-        raise NotImplementedError
+    def test_apply_named_sharding_places_arrays(self) -> None:
+        mesh_spec = MeshSpec(devices="all", axes=("model",))
+        mesh = mesh_spec.build()
+
+        params = {
+            "dense": {
+                "kernel": jnp.arange(8, dtype=jnp.float32).reshape(4, 2),
+                "bias": jnp.ones((2,), dtype=jnp.float32),
+            }
+        }
+
+        spec_tree = {
+            "dense": {
+                "kernel": PartitionSpec("model", None),
+                "bias": PartitionSpec(),
+            }
+        }
+
+        with mesh:
+            placed = sharding.apply_named_sharding(params, mesh, spec_tree)
+
+        kernel = placed["dense"]["kernel"]
+        bias = placed["dense"]["bias"]
+
+        assert isinstance(kernel, jax.Array)
+        assert isinstance(kernel.sharding, NamedSharding)
+        assert kernel.sharding.spec == PartitionSpec("model", None)
+        assert kernel.shape == (4, 2)
+
+        assert isinstance(bias, jax.Array)
+        assert isinstance(bias.sharding, NamedSharding)
+        assert bias.sharding.spec == PartitionSpec()
+
+    def test_apply_named_sharding_structure_mismatch(self) -> None:
+        mesh_spec = MeshSpec(devices="all", axes=("model",))
+        mesh = mesh_spec.build()
+
+        params = {"a": jnp.ones((2, 2)), "b": jnp.ones((2,))}
+        spec_tree = {"a": PartitionSpec("model", None)}
+
+        with mesh:
+            with pytest.raises(ShardingError) as exc:
+                sharding.apply_named_sharding(params, mesh, spec_tree)
+
+        assert "structure mismatch" in str(exc.value)
+
+    def test_apply_named_sharding_rejects_non_array_sharded_leaf(self) -> None:
+        mesh_spec = MeshSpec(devices="all", axes=("model",))
+        mesh = mesh_spec.build()
+
+        params = {"count": 3}
+        spec_tree = {"count": PartitionSpec("model")}
+
+        with mesh:
+            with pytest.raises(ShardingError) as exc:
+                sharding.apply_named_sharding(params, mesh, spec_tree)
+
+        assert "non-array leaf" in str(exc.value)
 
 
-@pytest.mark.skip(reason="P1.2 pending")
 class TestBatchSpecs:
-    def test_shard_batch_specs_placeholder(self) -> None:
-        raise NotImplementedError
+    def test_shard_batch_specs_applies_dp_axis_to_leading_dim(self) -> None:
+        batch_example = {
+            "images": jnp.zeros((8, 4, 4, 3)),
+            "labels": jnp.zeros((8,), dtype=jnp.int32),
+            "meta": {"is_train": True},
+        }
+
+        specs = sharding.shard_batch_specs(batch_example, dp_axis="data")
+
+        assert specs["images"] == PartitionSpec("data", None, None, None)
+        assert specs["labels"] == PartitionSpec("data")
+        assert specs["meta"]["is_train"] == PartitionSpec()
+
+    def test_shard_batch_specs_replicates_scalars(self) -> None:
+        scalar_batch = {"loss_scale": jnp.array(1.0), "step": 1}
+
+        specs = sharding.shard_batch_specs(scalar_batch, dp_axis="data")
+
+        assert specs["loss_scale"] == PartitionSpec()
+        assert specs["step"] == PartitionSpec()

@@ -9,12 +9,13 @@ add placement helpers that consume the resulting trees.
 from __future__ import annotations
 
 from fnmatch import fnmatchcase
-from typing import Dict, Mapping, Sequence, Tuple
+from typing import Dict, Mapping, Sequence, Tuple, cast
 
+import jax
 from jax import tree_util as jtu
 
-from titanax.exceptions import sharding_error
-from titanax.types import AxisName, Mesh, PartitionSpec, PyTree
+from ..exceptions import sharding_error
+from ..types import AxisName, Mesh, NamedSharding, PartitionSpec, PyTree
 
 # -----------------------------------------------------------------------------
 # Shared type aliases
@@ -144,21 +145,110 @@ def apply_named_sharding(
     mesh: Mesh,
     spec_tree: SpecTree,
 ) -> PyTree:
-    """Apply ``NamedSharding`` to each leaf in ``tree`` using ``spec_tree``.
+    """Return a new tree whose array leaves carry ``NamedSharding`` placements.
 
-    P1.2 populates this function with the actual ``device_put`` calls. The
-    stub clarifies the dependency on ``Mesh`` and keeps API documentation
-    centralized.
+    Each leaf that exposes ``shape``/``dtype`` is copied to devices with
+    ``jax.device_put`` using ``NamedSharding(mesh, spec)``. Non-array leaves are
+    returned unchanged when their spec is fully replicated.
     """
+    if NamedSharding is None:
+        raise sharding_error(
+            "<root>",
+            "NamedSharding is unavailable in the current JAX installation",
+            suggestion=(
+                "Install a JAX version that provides jax.sharding.NamedSharding"
+            ),
+        )
 
-    raise NotImplementedError("P1.2 applies NamedSharding to trees")
+    value_path_leaves, value_treedef = jtu.tree_flatten_with_path(tree)
+    spec_leaves, spec_treedef = jtu.tree_flatten(spec_tree)
+
+    if cast(object, value_treedef) != cast(object, spec_treedef):
+        raise sharding_error(
+            "<root>",
+            "structure mismatch between value tree and spec tree",
+            suggestion=(
+                "Build spec_tree via build_param_specs(...) so it mirrors the value structure"
+            ),
+        )
+
+    placed_leaves = []
+    for (path, leaf), spec in zip(value_path_leaves, spec_leaves):
+        path_str = _stringify_path(path)
+
+        if not isinstance(spec, PartitionSpec):
+            raise sharding_error(
+                path_str,
+                f"spec tree leaf is not a PartitionSpec instance: {spec!r}",
+                suggestion="Ensure spec_tree was created with PartitionSpec values",
+            )
+
+        if not _is_array_like(leaf):
+            if spec != PartitionSpec():
+                raise sharding_error(
+                    path_str,
+                    "cannot apply sharding spec to non-array leaf",
+                    suggestion="Provide array-like values for sharded parameters",
+                )
+            placed_leaves.append(leaf)
+            continue
+
+        try:
+            named_sharding = NamedSharding(mesh, spec)
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - jax raises ValueError/TypeError variants
+            raise sharding_error(
+                path_str,
+                f"failed to construct NamedSharding for spec {spec!r}: {exc}",
+                suggestion="Check that spec axes exist on the provided mesh",
+            ) from exc
+
+        try:
+            placed = jax.device_put(leaf, named_sharding)
+        except (
+            Exception
+        ) as exc:  # pragma: no cover - backend errors vary across JAX versions
+            raise sharding_error(
+                path_str,
+                f"device_put with spec {spec!r} failed: {exc}",
+                suggestion=(
+                    "Verify that the array shape is compatible with the spec and mesh axis sizes"
+                ),
+            ) from exc
+
+        placed_leaves.append(placed)
+
+    return jtu.tree_unflatten(value_treedef, placed_leaves)
 
 
 def shard_batch_specs(batch_example: PyTree, dp_axis: AxisName) -> SpecTree:
-    """Derive default batch ``PartitionSpec`` values for DP sharding.
+    """Generate DP-aligned ``PartitionSpec`` trees for representative batches.
 
-    Future implementation (P1.2) will inspect the batch structure and shard
-    leading dimensions along ``dp_axis`` when appropriate.
+    The leading dimension of every array-like leaf is sharded along
+    ``dp_axis``; remaining dimensions are replicated. Scalar leaves and
+    non-array metadata are fully replicated.
     """
+    return jtu.tree_map(lambda leaf: _spec_for_batch_leaf(leaf, dp_axis), batch_example)
 
-    raise NotImplementedError("P1.2 defines batch sharding defaults")
+
+def _is_array_like(value: object) -> bool:
+    if isinstance(value, jax.ShapeDtypeStruct):
+        return True
+    return hasattr(value, "shape") and hasattr(value, "dtype")
+
+
+def _spec_for_batch_leaf(leaf: object, dp_axis: AxisName) -> PartitionSpec:
+    if not _is_array_like(leaf):
+        return PartitionSpec()
+
+    ndim = getattr(leaf, "ndim", None)
+    if ndim is None:
+        shape = getattr(leaf, "shape", None)
+        ndim = len(shape) if shape is not None else 0
+
+    if ndim <= 0:
+        return PartitionSpec()
+
+    trailing = (None,) * (ndim - 1)
+    return PartitionSpec(dp_axis, *trailing)
