@@ -8,7 +8,6 @@ and verifies that activations and gradients carry the expected sharding.
 
 from __future__ import annotations
 
-import functools
 from typing import Any, Dict, Tuple
 
 import jax
@@ -51,7 +50,26 @@ def _shard_tree(tree: Dict[str, Any], specs: Dict[str, Any], mesh) -> Dict[str, 
     )
 
 
+def configure_devices() -> None:
+    """Configure JAX to prefer GPU over CPU with fallback."""
+    from titanax.runtime.init import get_device_info, enumerate_devices
+
+    device_info = get_device_info()
+    gpus = enumerate_devices(device_type="gpu")
+
+    print(f"Device info: {device_info['local_devices_by_type']}")
+    print(f"JAX backend: {jax.default_backend()}")
+    print(f"Available devices: {[str(d) for d in jax.devices()]}")
+
+    if gpus:
+        print(f"Using {len(gpus)} GPU(s) for computation")
+    else:
+        print("No GPUs available, using CPU")
+
+
 def main() -> None:
+    configure_devices()
+
     key = jax.random.PRNGKey(0)
     input_dim = 4
     hidden_dim = 16
@@ -105,54 +123,53 @@ def main() -> None:
     }
     sharded_batch = _shard_tree({"x": features, "y": targets}, batch_specs, mesh)
 
-    @functools.partial(
-        pjit,
-        in_shardings=(param_specs, batch_specs),
-        out_shardings=(
-            param_specs,
-            None,
-            param_specs,
-            {"logits": PartitionSpec(), "hidden": PartitionSpec(None, "model")},
-        ),
-    )
     def train_step(params_tree, batch):
-        with tx.collectives.mesh_context(mesh):
+        def model_apply(p, inputs):
+            w1 = p["mlp"]["in_proj"]["kernel"]
+            b1 = p["mlp"]["in_proj"]["bias"]
+            w2 = p["mlp"]["out_proj"]["kernel"]
+            b2 = p["mlp"]["out_proj"]["bias"]
 
-            def model_apply(p, inputs):
-                w1 = p["mlp"]["in_proj"]["kernel"]
-                b1 = p["mlp"]["in_proj"]["bias"]
-                w2 = p["mlp"]["out_proj"]["kernel"]
-                b2 = p["mlp"]["out_proj"]["bias"]
+            hidden = jnp.dot(inputs, w1) + b1
+            hidden = jax.nn.relu(hidden)
+            partial_out = jnp.dot(hidden, w2)
+            # GSPMD automatically inserts all-reduce for sharded contraction
+            logits = partial_out + b2
+            return logits, hidden
 
-                hidden = jnp.dot(inputs, w1) + b1
-                hidden = jax.nn.relu(hidden)
-                partial_out = jnp.dot(hidden, w2)
-                logits = tx.collectives.psum(partial_out, axis="model") + b2
-                return logits, hidden
+        def loss_and_aux(p):
+            logits, hidden = model_apply(p, batch["x"])
+            loss = jnp.mean((logits - batch["y"]) ** 2)
+            return loss, {"logits": logits, "hidden": hidden}
 
-            def loss_and_aux(p):
-                logits, hidden = model_apply(p, batch["x"])
-                loss = jnp.mean((logits - batch["y"]) ** 2)
-                return loss, {"logits": logits, "hidden": hidden}
-
-            (loss, aux), grads = jax.value_and_grad(loss_and_aux, has_aux=True)(
-                params_tree
-            )
-            grads = jax.tree_util.tree_map(
-                lambda g: tx.collectives.psum(g, axis="model"), grads
-            )
-            new_params = jax.tree_util.tree_map(
-                lambda p, g: p - learning_rate * g, params_tree, grads
-            )
-            return new_params, loss, grads, aux
+        (loss, aux), grads = jax.value_and_grad(loss_and_aux, has_aux=True)(params_tree)
+        # No explicit psum needed - grads will match param shardings automatically
+        new_params = jax.tree_util.tree_map(
+            lambda p, g: p - learning_rate * g, params_tree, grads
+        )
+        return new_params, loss, grads, aux
 
     losses = []
     first_aux = None
     first_grads = None
 
     with mesh:
+        # Compile the training step with proper sharding
+        compiled_step = pjit(
+            train_step,
+            in_shardings=(param_specs, batch_specs),
+            out_shardings=(
+                param_specs,
+                None,
+                param_specs,
+                {"logits": PartitionSpec(), "hidden": PartitionSpec(None, "model")},
+            ),
+        )
+
         for step in range(steps):
-            sharded_params, loss, grads, aux = train_step(sharded_params, sharded_batch)
+            sharded_params, loss, grads, aux = compiled_step(
+                sharded_params, sharded_batch
+            )
             loss_value = float(jax.device_get(loss))
             losses.append(loss_value)
             print(f"Step {step + 1}: loss={loss_value:.6f}")

@@ -39,7 +39,26 @@ def tree_update(params: ArrayTree, grads: ArrayTree, lr: float) -> ArrayTree:
     return jax.tree_util.tree_map(lambda p, g: p - lr * g, params, grads)
 
 
+def configure_devices() -> None:
+    """Configure JAX to prefer GPU over CPU with fallback."""
+    from titanax.runtime.init import get_device_info, enumerate_devices
+
+    device_info = get_device_info()
+    gpus = enumerate_devices(device_type="gpu")
+
+    print(f"Device info: {device_info['local_devices_by_type']}")
+    print(f"JAX backend: {jax.default_backend()}")
+    print(f"Available devices: {[str(d) for d in jax.devices()]}")
+
+    if gpus:
+        print(f"Using {len(gpus)} GPU(s) for computation")
+    else:
+        print("No GPUs available, using CPU")
+
+
 def main() -> None:
+    configure_devices()
+
     key = jax.random.PRNGKey(0)
     input_dim = 4
     hidden_dim = 8
