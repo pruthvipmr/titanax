@@ -121,6 +121,19 @@ class OptaxAdapter:
         else:
             return self.learning_rate  # type: ignore
 
+    def current_lr(self, step: int) -> float:
+        """Get current learning rate for a given step.
+
+        This is an alias for get_learning_rate() for API compatibility.
+
+        Args:
+            step: Training step number
+
+        Returns:
+            Current learning rate value
+        """
+        return self.get_learning_rate(step)
+
     def describe(self) -> str:
         """Return a human-readable description of the optimizer."""
         lr_desc = "scheduled" if self._lr_is_callable else f"{self.learning_rate}"

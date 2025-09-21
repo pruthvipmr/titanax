@@ -176,15 +176,17 @@ This document enumerates **all fixes, changes, and additions** to address before
 
 ## 8) Optimizers
 
-- [ ] **Optax adapter finishing touches**
+- [x] **Optax adapter finishing touches**
   - **Where:** `titanax/optim/optax_adapter.py`
   - **Change:** Keep LR schedules in Optax; expose `current_lr(step)`; document no duplicate scaling.
   - **DoD:** Minimal example prints current LR each step; moments unaffected by external scaling.
+  - **✅ COMPLETED:** Added `current_lr(step)` method as alias to `get_learning_rate(step)`. Documentation clearly explains that Optax handles LR scheduling internally to avoid breaking adaptive optimizers. Engine automatically logs `learning_rate` in metrics each step.
 
-- [ ] **Common recipes**
+- [x] **Common recipes**
   - **Where:** `titanax/optim/recipes.py`
   - **Add:** `adamw()` and `sgd()` convenience with typical defaults and schedule hooks (cosine, linear warmup).
   - **DoD:** Unit tests assert parameter registry/config correctness.
+  - **✅ COMPLETED:** Created comprehensive `recipes.py` module with enhanced `adamw()`, `sgd()`, and `adam_with_cosine_schedule()` functions supporting warmup/decay schedules. Added `LRSchedules` utility class with common schedule patterns. All functions include extensive parameter validation and 21 comprehensive unit tests covering edge cases, schedule behavior, and parameter correctness.
 
 ---
 
