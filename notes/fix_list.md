@@ -206,15 +206,17 @@ This document enumerates **all fixes, changes, and additions** to address before
 
 ---
 
-## 10) Quickstart API
+## 10) Quickstart API ✅ COMPLETED
 
-- [ ] **`simple_data_parallel(...)`**
+- [x] **`simple_data_parallel(...)`**
   - **Where:** `titanax/quickstart.py`
   - **DoD:** Returns an `Engine` configured for DP with: mesh, plan, precision, optimizer, checkpoint, logger; a minimal example trains for K steps on toy data.
+  - **✅ COMPLETED:** Implemented comprehensive `simple_data_parallel()` function with full validation, error handling, and sensible defaults. Created example in `examples/quickstart_example.py` that demonstrates the API. All 19 quickstart validation tests pass.
 
-- [ ] **`simple_tensor_parallel(...)`** (explicit NotImplemented with guidance)
+- [x] **`simple_tensor_parallel(...)`** (explicit NotImplemented with guidance)
   - **Where:** `titanax/quickstart.py`
   - **DoD:** Raises `NotImplementedError` with a link to the TP example and instructions to use `Plan + tp_helpers` directly.
+  - **✅ COMPLETED:** Implemented `simple_tensor_parallel()` that raises `NotImplementedError` with helpful guidance pointing users to the TP example and suggesting `Plan + tp_helpers` for manual TP setup. Includes clear messaging that full TP quickstart will be available in phase P1.
 
 ---
 
