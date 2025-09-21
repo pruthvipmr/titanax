@@ -8,7 +8,7 @@ from .pp import (
     create_simple_stage,
     create_1f1b_schedule,
 )
-from . import tp_helpers
+from . import tp_helpers, sharding
 
 __all__ = [
     "DP",
@@ -21,4 +21,5 @@ __all__ = [
     "create_simple_stage",
     "create_1f1b_schedule",
     "tp_helpers",
+    "sharding",
 ]

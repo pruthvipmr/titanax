@@ -503,7 +503,7 @@ The foundation is solid with comprehensive testing, error handling, working MNIS
 ## Phase P1: Tensor Parallel Core (Milestone 2)
 
 ### P1.1 Tensor Parallel Plan
-- [ ] **File: `titanax/parallel/rules.py`**
+- [ ] **File: `titanax/parallel/tp_helpers.py`**
   - [ ] Implement parameter path pattern matching
   - [ ] Add `PartitionSpec` creation from rules
   - [ ] Add transformer-specific rule templates

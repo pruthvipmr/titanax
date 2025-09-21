@@ -7,9 +7,10 @@ This plan reflects the current codebase after P0 completion and adjusts Phases P
 ## Phase P1: Tensor Parallel Core (Milestone 2)
 
 ### P1.0 Alignment & Scaffolding
-- Replace references to `parallel/rules.py` with existing `parallel/tp_helpers.py` for rule templates.
+- Ensure all references cite `parallel/tp_helpers.py` as the canonical rule helper module.
 - Introduce `parallel/sharding.py` for rule application utilities (pattern matching, PartitionSpec tree building, NamedSharding application).
 - Add unit tests for sharding utilities.
+- ✅ Completed: canonicalized documentation to `tp_helpers`, added `parallel/sharding.py` scaffolding with typed stubs, exported the module, and checked in a skipped `tests/unit/test_sharding_utils.py` harness to anchor future work.
 
 ### P1.1 Rule Matching → PartitionSpec Utilities
 - Implement `build_param_specs(params_tree, rules, default=PartitionSpec())` in `parallel/sharding.py`.
@@ -141,4 +142,3 @@ This plan reflects the current codebase after P0 completion and adjusts Phases P
 - CSV and TensorBoard loggers are implemented.
 
 This plan focuses remaining work on sharding utilities, TP/PP integration with the Engine and compile path, runnable TP/PP examples, DX (CLI + YAML), and rounding out tests, docs, and packaging.
-
