@@ -155,20 +155,22 @@ This document enumerates **all fixes, changes, and additions** to address before
 
 ## 7) Logging & Observability
 
-- [ ] **Stdout loggers + TB/CSV**
+- [x] **Stdout loggers + TB/CSV**
   - **Where:** `titanax/logging/`
   - **Add:** `Basic` and `CompactBasic` stdout loggers (if not present), plus `TensorBoardLogger` and `CSVLogger`.
   - **DoD:** Example scripts can switch loggers; TB scalars appear; CSV grows per step.
 
-- [ ] **Metrics meter**
+- [x] **Metrics meter**
   - **Where:** `titanax/logging/meter.py`
   - **Add:** Track throughput (samples/s), step latency, rolling averages; publish via logger interface.
   - **DoD:** Minimal DP example prints throughput and rolling loss/accuracy.
 
-- [ ] **Run header summary**
+- [x] **Run header summary**
   - **Where:** `titanax/exec/engine.py`
   - **Add:** At start, log: Titanax version, JAX version, device count, mesh shape, plan summary, optimizer+LR schedule summary.
   - **DoD:** Present at beginning of all scripts; covered by a golden log test.
+
+**✅ Section 7 Summary:** Added CSV and TensorBoard loggers alongside the stdout loggers, introduced a MetricsMeter that augments training logs with throughput/latency rolling averages, and emit a run header from `Engine.fit`. Minimal DP example now surfaces the new observability data and unit tests cover the logging backends and header output.
 
 ---
 

@@ -107,8 +107,15 @@ class TestErrorHandling:
         # Step 2 failed but was skipped
         assert final_state.step == 2  # Two successful steps
 
-        # Logger should have been called for successful steps
-        assert logger.log_dict.call_count == 2
+        # Logger is invoked once for the run header and once per successful step
+        assert logger.log_dict.call_count == 3
+
+        header_metrics = logger.log_dict.call_args_list[0].args[0]
+        assert "run/titanax_version" in header_metrics
+
+        for call in logger.log_dict.call_args_list[1:]:
+            metrics, _ = call.args
+            assert metrics["loss"] == 1.0
 
     def test_logging_error_handling_continue_by_default(self):
         """Test that logging errors are handled gracefully by default."""

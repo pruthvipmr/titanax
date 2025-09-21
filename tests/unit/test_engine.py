@@ -9,6 +9,7 @@ from src.titanax.exec import Engine, Precision, TrainState, step_fn
 from src.titanax.runtime import MeshSpec
 from src.titanax.parallel import Plan, DP
 from src.titanax.exceptions import CheckpointError, EngineError
+from src.titanax._version import __version__ as titanax_version
 
 
 class TestPrecision:
@@ -245,7 +246,9 @@ class TestEngine:
         """Set up test fixtures."""
         self.mesh_spec = MeshSpec(devices="all", axes=("data",))
         self.plan = Plan(data_parallel=DP(axis="data"))
-        self.optimizer = Mock()  # Mock optimizer
+        self.optimizer = Mock()
+        self.optimizer.describe.return_value = "mock_opt(lr=0.1)"
+        self.optimizer.get_learning_rate.return_value = 0.1
         self.precision = Precision()
 
         # Mock logger and checkpoint
@@ -402,9 +405,47 @@ class TestEngine:
         # Should have run 2 steps
         assert final_state.step == 2
 
-        # Check that metrics were logged
-        assert len(self.logger.logged_dicts) == 2
-        assert all(metrics["loss"] == 1.0 for metrics, step in self.logger.logged_dicts)
+        # Header + 2 training steps
+        assert len(self.logger.logged_dicts) == 3
+
+        header_metrics, header_step = self.logger.logged_dicts[0]
+        assert header_step == 0
+        assert "run/titanax_version" in header_metrics
+        assert "run/mesh" in header_metrics
+        assert "run/plan" in header_metrics
+
+        for metrics, step in self.logger.logged_dicts[1:]:
+            assert metrics["loss"] == 1.0
+            assert "meter/step_time_s" in metrics
+
+    def test_run_header_summary_contents(self):
+        """Golden test ensuring the run header records core metadata."""
+        engine = Engine(
+            mesh=self.mesh_spec,
+            plan=self.plan,
+            optimizer=self.optimizer,
+            loggers=[self.logger],
+        )
+
+        initial_state = TrainState(
+            params={"weight": jnp.ones((1,))},
+            opt_state={},
+            step=5,
+            rngs={"dropout": jax.random.PRNGKey(0)},
+        )
+
+        engine._log_run_header(initial_state)
+
+        header_metrics, header_step = self.logger.logged_dicts[0]
+        assert header_step == 5
+        assert header_metrics["run/titanax_version"] == titanax_version
+        assert header_metrics["run/jax_version"] == jax.__version__
+        assert header_metrics["run/device_count"] == jax.device_count()
+        assert header_metrics["run/mesh"] == self.mesh_spec.describe()
+        assert header_metrics["run/plan"] == self.plan.describe()
+        assert header_metrics["run/optimizer"] == "mock_opt(lr=0.1)"
+        assert header_metrics["run/learning_rate_start"] == 0.1
+        assert header_metrics["run/start_step"] == 5
 
     def test_fit_with_checkpoint_saving(self):
         """Test checkpoint saving during training."""

@@ -5,6 +5,7 @@ for managing training loops with explicit parallelization.
 """
 
 import dataclasses
+import time
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, TYPE_CHECKING
 
@@ -27,6 +28,7 @@ from ..types import (
     OptState,
     Mesh,
 )
+from ..logging.meter import MetricsMeter
 from ..runtime.mesh import MeshSpec
 from ..parallel.plan import Plan
 from ..exceptions import CheckpointError, EngineError
@@ -34,6 +36,7 @@ from .collectives import set_current_mesh
 from .step_fn import update_rngs
 from .compile import compile_step_with_plan
 from .prng import create_host_device_rngs, validate_rng_keys
+from .._version import __version__ as _titanax_version
 
 
 @dataclasses.dataclass(frozen=True)
@@ -215,6 +218,7 @@ class Engine:
         checkpoint: Optional[CheckpointStrategy] = None,
         loggers: Optional[List[Logger]] = None,
         checkpoint_interval: int | None = 1000,
+        metrics_meter: Optional[MetricsMeter] = None,
     ):
         self.mesh_spec = mesh
         self.plan = plan
@@ -222,6 +226,7 @@ class Engine:
         self.precision = precision
         self.checkpoint = checkpoint
         self.loggers = loggers or []
+        self._meter = metrics_meter or MetricsMeter()
         if checkpoint_interval is not None and checkpoint_interval <= 0:
             raise EngineError(
                 "checkpoint_interval must be positive when provided",
@@ -538,6 +543,8 @@ class Engine:
         set_current_mesh(self._mesh)
 
         current_step = 0
+        self._meter.reset()
+        self._log_run_header(run_state)
         self._save_checkpoint(run_state, tag="start", force=True)
         try:
             for batch in data:
@@ -545,12 +552,23 @@ class Engine:
                     break
 
                 try:
+                    step_start = time.perf_counter()
                     # Execute one training step
                     run_state, metrics = self._execute_step(run_state, batch)
+                    step_time = time.perf_counter() - step_start
+                    batch_size = self._infer_batch_size(batch)
+                    meter_metrics = self._meter.update(
+                        step=run_state.step,
+                        metrics=metrics,
+                        batch_size=batch_size,
+                        step_time_s=step_time,
+                    )
+                    combined_metrics = dict(metrics)
+                    combined_metrics.update(meter_metrics)
                     current_step += 1
 
                     # Log metrics
-                    self._log_metrics(metrics, run_state.step)
+                    self._log_metrics(combined_metrics, run_state.step)
 
                     # Save checkpoint periodically
                     self._save_checkpoint(run_state, tag="periodic", force=False)
@@ -751,6 +769,38 @@ class Engine:
             return x
 
         return jax.tree_util.tree_map(cast_param, params)
+
+    def _infer_batch_size(self, batch: BatchData) -> Optional[int]:
+        """Attempt to infer the batch size from a batch PyTree."""
+
+        leaves, _ = tree_util.tree_flatten(batch)
+        for leaf in leaves:
+            # Prefer JAX arrays but fall back to generic objects with shape attribute
+            if isinstance(leaf, jax.Array) and leaf.shape:
+                return int(leaf.shape[0])
+            if hasattr(leaf, "shape") and getattr(leaf, "shape"):
+                try:
+                    return int(leaf.shape[0])
+                except (TypeError, ValueError):
+                    continue
+        return None
+
+    def _log_run_header(self, state: Optional[TrainState]) -> None:
+        """Log a run header summary with environment and configuration details."""
+
+        start_step = getattr(state, "step", 0) if state is not None else 0
+        header: LogDict = {
+            "run/titanax_version": _titanax_version,
+            "run/jax_version": jax.__version__,
+            "run/device_count": jax.device_count(),
+            "run/mesh": self.mesh_spec.describe(),
+            "run/plan": self.plan.describe(),
+            "run/optimizer": self.optimizer.describe(),
+            "run/learning_rate_start": self.optimizer.get_learning_rate(start_step),
+            "run/start_step": start_step,
+        }
+
+        self._log_metrics(header, step=start_step, continue_on_error=True)
 
     def apply_loss_scaling(self, loss: Array) -> Array:
         """Apply loss scaling for fp16 training.

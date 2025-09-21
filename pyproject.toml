@@ -12,6 +12,7 @@ dependencies = [
     "optax>=0.2.5",
     "orbax-checkpoint>=0.11.24",
     "typer>=0.17.3",
+    "tensorboard>=2.17.0",
 ]
 
 [build-system]
