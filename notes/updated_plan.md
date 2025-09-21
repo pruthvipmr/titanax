@@ -18,6 +18,7 @@ This plan reflects the current codebase after P0 completion and adjusts Phases P
 - Add `spec_for(path, rules)` helper returning a single `PartitionSpec`.
 - Add `tree_paths(tree)` utility to enumerate param paths.
 - Tests: `tests/unit/test_sharding_utils.py` covering exact, glob, and conflict-precedence cases.
+- ✅ Completed: implemented path enumeration, rule matching, spec tree construction, and activated unit coverage in `tests/unit/test_sharding_utils.py`.
 
 ### P1.2 NamedSharding Application Helpers
 - Implement `apply_named_sharding(tree, mesh, spec_tree)` using `NamedSharding(mesh, spec)` and `jax.device_put`.
