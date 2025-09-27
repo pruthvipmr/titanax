@@ -63,6 +63,9 @@ def compile_step_with_plan(
     out_shardings: Optional[Any] = None,
     donate_argnums: tuple[int, ...] = (0,),
     static_argnums: tuple[int, ...] = (),
+    state_spec_tree: Optional[Any] = None,
+    batch_spec_tree: Optional[Any] = None,
+    metrics_spec_tree: Optional[Any] = None,
 ) -> StepFunction:
     """Compile ``step_fn`` using ``plan`` information and the provided mesh.
 
@@ -70,6 +73,11 @@ def compile_step_with_plan(
     ``PartitionSpec`` configurations are honoured. Otherwise we fall back to a
     ``shard_map``-wrapped ``jax.jit`` which keeps the ergonomics of map-style
     collectives while still running under the correct mesh context.
+
+    For tensor-parallel plans we can automatically construct ``pjit`` shardings
+    by providing ``state_spec_tree`` and ``batch_spec_tree``. When supplied, the
+    helper infers ``in_shardings``/``out_shardings`` tuples that mirror the step
+    function signature and return structure.
     """
 
     body = _get_validated_function(step_fn)
@@ -91,6 +99,28 @@ def compile_step_with_plan(
             donate_argnums=donate_argnums,
             static_argnums=static_argnums,
         )
+
+    auto_tp_enabled = (
+        plan.tensor_parallel is not None
+        and in_shardings is None
+        and out_shardings is None
+        and state_spec_tree is not None
+    )
+
+    if auto_tp_enabled:
+        spec_ctor = _get_partition_spec_ctor()
+
+        computed_in: list[Any] = [state_spec_tree]
+        if num_args >= 2:
+            computed_in.append(
+                batch_spec_tree if batch_spec_tree is not None else spec_ctor()
+            )
+        if num_args > 2:
+            computed_in.extend(spec_ctor() for _ in range(num_args - 2))
+
+        in_shardings = tuple(computed_in)
+        out_metrics = metrics_spec_tree if metrics_spec_tree is not None else None
+        out_shardings = (state_spec_tree, out_metrics)
 
     if in_shardings is not None or out_shardings is not None:
         if in_shardings is None or out_shardings is None:

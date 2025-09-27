@@ -7,7 +7,7 @@ for managing training loops with explicit parallelization.
 import dataclasses
 import time
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..optim.optax_adapter import OptaxAdapter
@@ -27,11 +27,17 @@ from ..types import (
     Params,
     OptState,
     Mesh,
+    PartitionSpec,
 )
 from ..logging.meter import MetricsMeter
 from ..runtime.mesh import MeshSpec
 from ..parallel.plan import Plan
 from ..exceptions import CheckpointError, EngineError
+from ..parallel.sharding import (
+    apply_named_sharding,
+    build_param_specs,
+    shard_batch_specs,
+)
 from .collectives import set_current_mesh
 from .step_fn import update_rngs
 from .compile import compile_step_with_plan
@@ -245,6 +251,12 @@ class Engine:
 
         # Initialize compiled step function (will be set when step_fn is registered)
         self._compiled_step_fn: Optional[StepFunction] = None
+        self._registered_step_fn: Optional[StepFunction] = None
+        self._pending_step_fn: Optional[StepFunction] = None
+        self._pending_compile_params: Dict[str, Any] = {}
+        self._param_spec_tree: Optional[PyTree] = None
+        self._state_spec_tree: Optional[PyTree] = None
+        self._batch_spec_tree: Optional[PyTree] = None
 
     def _validate_and_build_mesh(self) -> Mesh:
         """Validate and build the JAX mesh from specification."""
@@ -279,6 +291,8 @@ class Engine:
         Args:
             step_fn: The step function to compile and use for training
         """
+        self._registered_step_fn = step_fn
+
         # Get compilation parameters from the decorated function
         compile_params = getattr(step_fn, "_compile_params", {})
         donate_argnums = compile_params.get("donate_argnums", (0,))
@@ -286,16 +300,39 @@ class Engine:
         in_shardings = compile_params.get("in_shardings")
         out_shardings = compile_params.get("out_shardings")
 
-        # Compile with proper mesh context for collectives
-        self._compiled_step_fn = compile_step_with_plan(
-            step_fn,
-            self.plan,
-            self._mesh,
-            in_shardings=in_shardings,
-            out_shardings=out_shardings,
-            donate_argnums=donate_argnums,
-            static_argnums=static_argnums,
+        # Reset cached sharding state whenever the step function changes
+        self._param_spec_tree = None
+        self._state_spec_tree = None
+        self._batch_spec_tree = None
+
+        pending_tp = (
+            self.plan.tensor_parallel is not None
+            and in_shardings is None
+            and out_shardings is None
         )
+
+        if pending_tp:
+            # Defer compilation until runtime structures are available
+            self._pending_step_fn = step_fn
+            self._pending_compile_params = {
+                "donate_argnums": donate_argnums,
+                "static_argnums": static_argnums,
+            }
+            self._compiled_step_fn = None
+        else:
+            self._pending_step_fn = None
+            self._pending_compile_params = {}
+
+            # Compile with proper mesh context for collectives
+            self._compiled_step_fn = compile_step_with_plan(
+                step_fn,
+                self.plan,
+                self._mesh,
+                in_shardings=in_shardings,
+                out_shardings=out_shardings,
+                donate_argnums=donate_argnums,
+                static_argnums=static_argnums,
+            )
 
     def create_state(
         self,
@@ -334,13 +371,35 @@ class Engine:
                 suggestion="Check that parameters are valid JAX PyTrees",
             ) from e
 
-        return TrainState(
+        new_state = TrainState(
             params=cast_params,
             opt_state=opt_state,
             step=0,
             rngs=rngs,
             _optimizer=self.optimizer,
         )
+
+        self._ensure_state_spec_tree(new_state)
+
+        return new_state
+
+    def shard_params(self, params: Params) -> Params:
+        """Apply tensor-parallel ``NamedSharding`` placements to ``params``."""
+
+        if self.plan.tensor_parallel is None:
+            return params
+
+        spec_tree = self._ensure_param_spec_tree(params)
+        if spec_tree is None:
+            return params
+
+        try:
+            return apply_named_sharding(params, self._mesh, spec_tree)
+        except Exception as exc:  # pragma: no cover - sharding errors handled upstream
+            raise EngineError(
+                f"Failed to apply tensor parallel sharding: {exc}",
+                suggestion="Verify tensor parallel rules match parameter structure and mesh axes",
+            ) from exc
 
     def step(self, state: TrainState, batch: BatchData) -> tuple[TrainState, LogDict]:
         """Execute a single training step.
@@ -352,6 +411,9 @@ class Engine:
         Returns:
             Tuple of (updated_state, metrics)
         """
+        if self._compiled_step_fn is None and self._pending_step_fn is not None:
+            self._compile_pending_step_fn(state, batch)
+
         if self._compiled_step_fn is None:
             raise EngineError(
                 "No step function registered",
@@ -548,6 +610,19 @@ class Engine:
         self._save_checkpoint(run_state, tag="start", force=True)
         try:
             for batch in data:
+                if (
+                    self._compiled_step_fn is None
+                    and self._pending_step_fn is not None
+                    and run_state is not None
+                ):
+                    self._compile_pending_step_fn(run_state, batch)
+
+                if self._compiled_step_fn is None:
+                    raise EngineError(
+                        "No step function registered",
+                        suggestion="Call register_step_fn() or engine.step() before fit",
+                    )
+
                 if steps is not None and current_step >= steps:
                     break
 
@@ -605,6 +680,89 @@ class Engine:
         self._save_checkpoint(run_state, tag="final", force=True)
 
         return run_state
+
+    def _ensure_param_spec_tree(self, params: Params) -> Optional[PyTree]:
+        """Return cached parameter ``PartitionSpec`` tree, recomputing if needed."""
+
+        if self.plan.tensor_parallel is None:
+            return None
+
+        tp_config = self.plan.tensor_parallel
+        default_spec = PartitionSpec()
+        self._param_spec_tree = build_param_specs(
+            params,
+            tp_config.rules,
+            default=default_spec,
+        )
+        return self._param_spec_tree
+
+    def _ensure_state_spec_tree(self, state: TrainState) -> Optional[PyTree]:
+        """Return cached TrainState sharding specs derived from parameter specs."""
+
+        if self.plan.tensor_parallel is None:
+            return None
+
+        param_spec_tree = self._ensure_param_spec_tree(state.params)
+        if param_spec_tree is None:
+            return None
+
+        opt_state_spec = tree_util.tree_map(lambda _: PartitionSpec(), state.opt_state)
+        rng_spec = tree_util.tree_map(lambda _: PartitionSpec(), state.rngs)
+        aux_data = (state.step, getattr(state, "_optimizer", None))
+        self._state_spec_tree = TrainState.tree_unflatten(
+            aux_data,
+            (param_spec_tree, opt_state_spec, rng_spec),
+        )
+        return self._state_spec_tree
+
+    def _ensure_batch_spec_tree(self, batch: BatchData) -> Optional[PyTree]:
+        """Return cached batch sharding specs derived from plan configuration."""
+
+        if self.plan.tensor_parallel is None:
+            return None
+
+        if self.plan.data_parallel is not None:
+            self._batch_spec_tree = shard_batch_specs(
+                batch, self.plan.data_parallel.axis
+            )
+        else:
+            self._batch_spec_tree = tree_util.tree_map(lambda _: PartitionSpec(), batch)
+
+        return self._batch_spec_tree
+
+    def _compile_pending_step_fn(self, state: TrainState, batch: BatchData) -> None:
+        """Compile deferred TP step functions once runtime structures are known."""
+
+        if self._pending_step_fn is None:
+            return
+
+        state_spec_tree = self._ensure_state_spec_tree(state)
+        if state_spec_tree is None:
+            raise EngineError(
+                "Tensor parallel compilation requires parameter sharding specs",
+                suggestion="Ensure Engine.create_state was called before the first step",
+            )
+
+        batch_spec_tree = self._ensure_batch_spec_tree(batch)
+
+        try:
+            self._compiled_step_fn = compile_step_with_plan(
+                self._pending_step_fn,
+                self.plan,
+                self._mesh,
+                donate_argnums=self._pending_compile_params.get("donate_argnums", (0,)),
+                static_argnums=self._pending_compile_params.get("static_argnums", ()),
+                state_spec_tree=state_spec_tree,
+                batch_spec_tree=batch_spec_tree,
+            )
+        except Exception as exc:
+            raise EngineError(
+                f"Failed to compile tensor parallel step function: {exc}",
+                suggestion="Verify tensor parallel rules align with mesh axes and step signature",
+            ) from exc
+
+        self._pending_step_fn = None
+        self._pending_compile_params = {}
 
     def _get_batch_axis(self) -> str:
         """Get the batch axis name for PRNG key updates.

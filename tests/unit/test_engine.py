@@ -7,9 +7,25 @@ from unittest.mock import Mock, patch
 
 from src.titanax.exec import Engine, Precision, TrainState, step_fn
 from src.titanax.runtime import MeshSpec
-from src.titanax.parallel import Plan, DP
+from src.titanax.parallel import Plan, DP, TP
 from src.titanax.exceptions import CheckpointError, EngineError
 from src.titanax._version import __version__ as titanax_version
+from src.titanax.compat import PartitionSpec
+
+
+class _DummyDevices:
+    size = 2
+
+
+class _DummyMesh:
+    devices = _DummyDevices()
+    axis_names = ("data", "model")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        return False
 
 
 class TestPrecision:
@@ -321,6 +337,95 @@ class TestEngine:
         assert "Precision:" in description
         assert "Checkpoint: enabled" in description
         assert "Loggers: 1 configured" in description
+
+    def test_engine_lazy_compile_for_tensor_parallel(self, monkeypatch):
+        """Engine defers compilation until runtime structures for TP plans."""
+
+        mesh_spec = MeshSpec(devices="all", axes=("data", "model"))
+        plan = Plan(
+            data_parallel=DP(axis="data"),
+            tensor_parallel=TP(axis="model", rules={"linear/kernel": ("model", None)}),
+        )
+        optimizer = Mock()
+        optimizer.describe.return_value = "mock_opt"
+        optimizer.get_learning_rate.return_value = 0.1
+        optimizer.init.return_value = {"linear": {"momentum": jnp.zeros((2, 2))}}
+
+        dummy_mesh = _DummyMesh()
+        monkeypatch.setattr(mesh_spec, "build", lambda: dummy_mesh)
+
+        compile_calls = []
+
+        def fake_compile(step_fn, _plan, _mesh, **kwargs):
+            compile_calls.append(kwargs)
+            return step_fn
+
+        monkeypatch.setattr(
+            "src.titanax.exec.engine.compile_step_with_plan", fake_compile
+        )
+
+        engine = Engine(mesh=mesh_spec, plan=plan, optimizer=optimizer)
+
+        @step_fn()
+        def simple_step(state, batch):
+            return state.replace(step=state.step + 1), {"loss": jnp.array(0.0)}
+
+        engine.register_step_fn(simple_step)
+
+        assert engine._compiled_step_fn is None
+        assert engine._pending_step_fn is simple_step
+        assert compile_calls == []
+
+        params = {"linear": {"kernel": jnp.ones((2, 2))}}
+        state = engine.create_state(params)
+        assert engine._param_spec_tree is not None
+
+        batch = {"inputs": jnp.ones((4, 2)), "labels": jnp.ones((4,))}
+        new_state, metrics = engine.step(state, batch)
+
+        assert compile_calls, "expected lazy compilation to trigger"
+        compile_kwargs = compile_calls[0]
+        assert compile_kwargs["state_spec_tree"] is engine._state_spec_tree
+        assert compile_kwargs["batch_spec_tree"] is engine._batch_spec_tree
+        assert engine._compiled_step_fn is not None
+        assert engine._pending_step_fn is None
+        assert new_state.step == state.step + 1
+        assert "loss" in metrics
+
+    def test_engine_shard_params_applies_named_sharding(self, monkeypatch):
+        """Engine.shard_params uses tensor-parallel rules for placement."""
+
+        mesh_spec = MeshSpec(devices="all", axes=("data", "model"))
+        plan = Plan(
+            data_parallel=None,
+            tensor_parallel=TP(axis="model", rules={"linear/kernel": ("model", None)}),
+        )
+        optimizer = Mock()
+        optimizer.describe.return_value = "mock_opt"
+        optimizer.get_learning_rate.return_value = 0.1
+        optimizer.init.return_value = {"linear": {"momentum": jnp.zeros((2, 2))}}
+
+        dummy_mesh = _DummyMesh()
+        monkeypatch.setattr(mesh_spec, "build", lambda: dummy_mesh)
+
+        captured: dict[str, object] = {}
+
+        def fake_apply(_params, mesh_arg, spec_tree):
+            captured["mesh"] = mesh_arg
+            captured["spec_tree"] = spec_tree
+            return {"sharded": True}
+
+        monkeypatch.setattr("src.titanax.exec.engine.apply_named_sharding", fake_apply)
+
+        engine = Engine(mesh=mesh_spec, plan=plan, optimizer=optimizer)
+
+        params = {"linear": {"kernel": jnp.ones((2, 2))}}
+        result = engine.shard_params(params)
+
+        assert result == {"sharded": True}
+        assert captured["mesh"] is dummy_mesh
+        spec_tree = captured["spec_tree"]
+        assert spec_tree["linear"]["kernel"] == PartitionSpec("model", None)
 
     @patch("src.titanax.exec.engine.set_current_mesh")
     def test_mesh_context_set(self, mock_set_mesh):
